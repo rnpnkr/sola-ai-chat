@@ -1,0 +1,9 @@
+# .cursorrules
+
+# This file is Cursor's learning journal for the Sola AI Chat project.
+# It captures important patterns, preferences, and project intelligence.
+
+## ElevenLabs State Tracking Workaround
+- Due to the ElevenLabs Python SDK lacking a direct `onModeChange` callback or easy access to real-time audio output status, conversation state (especially SPEAKING and IDLE) is currently inferred using timer-based estimations in the `ConversationStateManager`.
+- The estimation for SPEAKING duration is based on text length and an assumed speaking rate.
+- This is a known limitation and workaround. If future SDK versions provide more direct audio status or state events, the implementation should be updated for accuracy. 
