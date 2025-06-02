@@ -4,7 +4,7 @@ Modular design allows easy swapping of services
 """
 import os
 from deepgram_service import DeepgramService
-from ai_service import AzureOpenAIService
+from ai_service import OpenRouterService
 from tts_service import ElevenLabsService
 
 
@@ -20,7 +20,7 @@ class VoiceAssistant:
         """
         # Use default services if none provided
         self.stt_service = stt_service or DeepgramService()
-        self.ai_service = ai_service or AzureOpenAIService()
+        self.ai_service = ai_service or OpenRouterService()
         self.tts_service = tts_service or ElevenLabsService()
 
     def process_audio(self, input_audio_path, output_audio_path="ai_response.mp3"):
