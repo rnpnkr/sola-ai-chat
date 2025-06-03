@@ -34,6 +34,7 @@ VoiceWell AI addresses the growing loneliness crisis affecting over 60% of Ameri
 - **bolt.new** - Rapid prototyping and frontend development
 - **React Native** - Cross-platform mobile application
 - **React** - Web interface
+- **mobile-frontend/** - React Native Android app for audio visualization and state UI (SPEAKING state, etc.)
 
 ### Backend & AI
 - **Eleven Labs** - High-quality voice synthesis and conversation

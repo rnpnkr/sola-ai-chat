@@ -2,7 +2,7 @@
 
 ## Technologies Used
 - Frontend/Mobile: bolt.new, React Native (planned), React (used for basic frontend structure), HTML5 Canvas (for visualization)
-- Backend/AI: Eleven Labs (voice), FastAPI (web server), WebSockets (via FastAPI/uvicorn), mem0 (planned), Supabase (planned), OpenAI/Anthropic (planned), Pinecone/Weaviate (planned), PyAudio (used by DefaultAudioInterface)
+- Backend/AI: Eleven Labs (voice), FastAPI (web server), WebSockets (via FastAPI/uvicorn), `custom_audio_interface.py` (for audio streaming), mem0 (planned), Supabase (planned), OpenAI/Anthropic (planned), Pinecone/Weaviate (planned), PyAudio (used by DefaultAudioInterface/WaveformAudioInterface)
 - Additional Services: RevenueCat (planned), Sentry (planned), Analytics (planned)
 
 ## Development Setup
@@ -18,7 +18,8 @@
 - Efficient memory management for long-term context (mem0 integration).
 - Ensuring privacy and security of user data.
 - ElevenLabs Python SDK limitations regarding direct audio output tracking and explicit state callbacks necessitate workarounds.
+- Frontend waveform visualization requires processing raw audio data stream via Web Audio API (for web) or native audio APIs (for mobile).
 
 ## Dependencies
 - Backend: `elevenlabs`, `fastapi`, `uvicorn`, `python-multipart`, `python-dotenv`, `pyaudio`
-- Frontend: `react`, `react-dom`, `react-scripts` 
+- Frontend: `react`, `react-dom`, `react-scripts`, Web Audio API (for visualization on web)
