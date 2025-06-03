@@ -3,3 +3,5 @@ openai
 python-dotenv
 pygame
 python-dotenv
+websockets
+elevenlabs
