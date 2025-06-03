@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket Voice Assistant</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 40px;
+            max-width: 700px;
+            width: 100%;
+            box-shadow: 0 8px 32px rgba(31, 38, 135, 0.37);
+            border: 1px solid rgba(255, 255, 255, 0.18);
+        }
+
+        h1 {
+            text-align: center;
+            color: white;
+            margin-bottom: 30px;
+            font-size: 2.5rem;
+            font-weight: 300;
+        }
+
+        .connection-status {
+            text-align: center;
+            margin-bottom: 20px;
+            padding: 10px;
+            border-radius: 10px;
+            font-weight: bold;
+        }
+
+        .connection-status.connected {
+            background: rgba(46, 204, 113, 0.3);
+            color: #2ecc71;
+        }
+
+        .connection-status.disconnected {
+            background: rgba(231, 76, 60, 0.3);
+            color: #e74c3c;
+        }
+
+        .connection-status.connecting {
+            background: rgba(241, 196, 15, 0.3);
+            color: #f1c40f;
+        }
+
+        .controls {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .control-group {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+            padding: 20px;
+        }
+
+        .control-group h3 {
+            color: white;
+            margin-bottom: 15px;
+            font-size: 1.2rem;
+        }
+
+        .file-input-wrapper {
+            position: relative;
+            display: inline-block;
+            margin-bottom: 15px;
+        }
+
+        .file-input {
+            display: none;
+        }
+
+        .file-input-label {
+            display: inline-block;
+            padding: 12px 25px;
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            border-radius: 25px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+        }
+
+        .file-input-label:hover {
+            background: rgba(255, 255, 255, 0.3);
+            transform: translateY(-2px);
+        }
+
+        .btn {
+            background: linear-gradient(45deg, #ff6b6b, #ffd93d);
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 25px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin: 5px;
+        }
+
+        .btn:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn.record-btn {
+            background: #ff4757;
+            border-radius: 50%;
+            width: 70px;
+            height: 70px;
+            font-size: 24px;
+            margin: 0 auto;
+            display: block;
+        }
+
+        .btn.record-btn.recording {
+            background: #ff3838;
+            animation: pulse 1s infinite;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+            100% { transform: scale(1); }
+        }
+
+        .text-input {
+            width: 100%;
+            padding: 15px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 10px;
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            font-size: 16px;
+            margin-bottom: 15px;
+            resize: vertical;
+            min-height: 100px;
+        }
+
+        .text-input::placeholder {
+            color: rgba(255, 255, 255, 0.7);
+        }
+
+        .status-panel {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 20px;
+            min-height: 100px;
+        }
+
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 0;
+            color: white;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .status-item:last-child {
+            border-bottom: none;
+        }
+
+        .status-icon {
+            width: 20px;
+            text-align: center;
+        }
+
+        .status-text {
+            flex: 1;
+        }
+
+        .status-time {
+            font-size: 12px;
+            opacity: 0.7;
+        }
+
+        .results {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+            padding: 20px;
+            margin-top: 20px;
+            display: none;
+        }
+
+        .result-item {
+            margin-bottom: 20px;
+            color: white;
+        }
+
+        .result-label {
+            font-weight: bold;
+            color: #ffd93d;
+            display: block;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+
+        .result-content {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 15px;
+            border-radius: 10px;
+            word-wrap: break-word;
+            line-height: 1.5;
+        }
+
+        audio {
+            width: 100%;
+            margin-top: 10px;
+        }
+
+        .filename {
+            color: #ffd93d;
+            font-size: 12px;
+            margin-top: 8px;
+            word-break: break-all;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎤 WebSocket Voice Assistant</h1>
+
+        <!-- Connection Status -->
+        <div id="connectionStatus" class="connection-status disconnected">
+            🔴 Disconnected
+        </div>
+
+        <!-- Control Sections -->
+        <div class="controls">
+            <!-- File Upload -->
+            <div class="control-group">
+                <h3>📁 Upload Audio File</h3>
+                <div class="file-input-wrapper">
+                    <input type="file" id="audioFile" class="file-input" accept="audio/*">
+                    <label for="audioFile" class="file-input-label">Choose Audio File</label>
+                </div>
+                <div class="filename" id="fileName"></div>
+                <button id="uploadBtn" class="btn" disabled>🚀 Process Audio</button>
+            </div>
+
+            <!-- Voice Recording -->
+            <div class="control-group">
+                <h3>🎙️ Voice Recording</h3>
+                <button id="recordBtn" class="btn record-btn">🎙️</button>
+                <div style="text-align: center; color: white; margin-top: 10px;" id="recordStatus">
+                    Click to start recording
+                </div>
+            </div>
+
+            <!-- Text to Speech -->
+            <div class="control-group">
+                <h3>📝 Text to Speech</h3>
+                <textarea id="textInput" class="text-input" placeholder="Enter text to convert to speech..."></textarea>
+                <button id="ttsBtn" class="btn" disabled>🔊 Generate Speech</button>
+            </div>
+        </div>
+
+        <!-- Status Panel -->
+        <div class="status-panel">
+            <h3 style="color: white; margin-bottom: 15px;">📊 Status</h3>
+            <div id="statusList">
+                <div class="status-item">
+                    <span class="status-icon">ℹ️</span>
+                    <span class="status-text">Ready to connect...</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Results -->
+        <div class="results" id="results">
+            <div class="result-item">
+                <span class="result-label">📝 TRANSCRIPT</span>
+                <div class="result-content" id="transcript"></div>
+            </div>
+            <div class="result-item">
+                <span class="result-label">🤖 AI RESPONSE</span>
+                <div class="result-content" id="aiResponse"></div>
+            </div>
+            <div class="result-item">
+                <span class="result-label">🔊 GENERATED AUDIO</span>
+                <audio id="responseAudio" controls></audio>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        class VoiceAssistantWebSocket {
+            constructor() {
+                this.ws = null;
+                this.clientId = this.generateClientId();
+                this.isRecording = false;
+                this.mediaRecorder = null;
+                this.recordedChunks = [];
+
+                this.initializeElements();
+                this.setupEventListeners();
+                this.connect();
+            }
+
+            generateClientId() {
+                return 'client_' + Date.now() + '_' + Math.random().toString(36).substring(2, 15);
+            }
+
+            initializeElements() {
+                this.elements = {
+                    connectionStatus: document.getElementById('connectionStatus'),
+                    statusList: document.getElementById('statusList'),
+                    audioFile: document.getElementById('audioFile'),
+                    fileName: document.getElementById('fileName'),
+                    uploadBtn: document.getElementById('uploadBtn'),
+                    recordBtn: document.getElementById('recordBtn'),
+                    recordStatus: document.getElementById('recordStatus'),
+                    textInput: document.getElementById('textInput'),
+                    ttsBtn: document.getElementById('ttsBtn'),
+                    results: document.getElementById('results'),
+                    transcript: document.getElementById('transcript'),
+                    aiResponse: document.getElementById('aiResponse'),
+                    responseAudio: document.getElementById('responseAudio')
+                };
+            }
+
+            setupEventListeners() {
+                // File upload
+                this.elements.audioFile.addEventListener('change', (e) => {
+                    const file = e.target.files[0];
+                    if (file) {
+                        this.elements.fileName.textContent = `Selected: ${file.name}`;
+                        this.elements.uploadBtn.disabled = false;
+                    }
+                });
+
+                this.elements.uploadBtn.addEventListener('click', () => {
+                    this.uploadAudioFile();
+                });
+
+                // Recording
+                this.elements.recordBtn.addEventListener('click', () => {
+                    if (this.isRecording) {
+                        this.stopRecording();
+                    } else {
+                        this.startRecording();
+                    }
+                });
+
+                // Text to Speech
+                this.elements.textInput.addEventListener('input', (e) => {
+                    this.elements.ttsBtn.disabled = !e.target.value.trim();
+                });
+
+                this.elements.ttsBtn.addEventListener('click', () => {
+                    this.textToSpeech();
+                });
+            }
+
+            connect() {
+                const wsUrl = `ws://localhost:8000/ws/${this.clientId}`;
+                this.updateConnectionStatus('connecting', '🟡 Connecting...');
+
+                try {
+                    this.ws = new WebSocket(wsUrl);
+
+                    this.ws.onopen = () => {
+                        this.updateConnectionStatus('connected', '🟢 Connected');
+                        this.addStatusMessage('✅', 'Connected to server', 'success');
+                        this.enableControls(true);
+                    };
+
+                    this.ws.onmessage = (event) => {
+                        this.handleMessage(JSON.parse(event.data));
+                    };
+
+                    this.ws.onclose = () => {
+                        this.updateConnectionStatus('disconnected', '🔴 Disconnected');
+                        this.addStatusMessage('❌', 'Disconnected from server', 'error');
+                        this.enableControls(false);
+
+                        // Auto-reconnect after 3 seconds
+                        setTimeout(() => {
+                            if (this.ws.readyState === WebSocket.CLOSED) {
+                                this.connect();
+                            }
+                        }, 3000);
+                    };
+
+                    this.ws.onerror = (error) => {
+                        console.error('WebSocket error:', error);
+                        this.addStatusMessage('⚠️', 'Connection error', 'error');
+                    };
+
+                } catch (error) {
+                    console.error('Failed to connect:', error);
+                    this.updateConnectionStatus('disconnected', '🔴 Connection Failed');
+                }
+            }
+
+            handleMessage(message) {
+                console.log('Received message:', message);
+
+                switch (message.type) {
+                    case 'status':
+                        this.handleStatusMessage(message);
+                        break;
+                    case 'result':
+                        this.handleResult(message);
+                        break;
+                    case 'error':
+                        this.handleError(message);
+                        break;
+                    case 'pong':
+                        // Handle keepalive
+                        break;
+                }
+            }
+
+            handleStatusMessage(message) {
+                const statusMap = {
+                    'saving_audio': { icon: '💾', text: 'Saving audio file...' },
+                    'transcribing': { icon: '🔤', text: 'Transcribing speech...' },
+                    'transcription_complete': { icon: '✅', text: 'Transcription complete' },
+                    'generating_response': { icon: '🤖', text: 'Generating AI response...' },
+                    'response_generated': { icon: '✅', text: 'AI response generated' },
+                    'generating_speech': { icon: '🔊', text: 'Converting to speech...' },
+                    'completed': { icon: '🎉', text: 'Processing completed!' }
+                };
+
+                const statusInfo = statusMap[message.status] || { icon: 'ℹ️', text: message.status };
+                this.addStatusMessage(statusInfo.icon, statusInfo.text, 'info');
+
+                // Show intermediate results
+                if (message.transcript) {
+                    this.elements.transcript.textContent = message.transcript;
+                    this.elements.results.style.display = 'block';
+                }
+                if (message.ai_response) {
+                    this.elements.aiResponse.textContent = message.ai_response;
+                }
+            }
+
+            handleResult(message) {
+                if (message.transcript) {
+                    this.elements.transcript.textContent = message.transcript;
+                }
+                if (message.ai_response) {
+                    this.elements.aiResponse.textContent = message.ai_response;
+                }
+                if (message.text) {
+                    this.elements.aiResponse.textContent = message.text;
+                }
+                if (message.audio_data) {
+                    const audioBlob = this.base64ToBlob(message.audio_data, 'audio/mpeg');
+                    const audioUrl = URL.createObjectURL(audioBlob);
+                    this.elements.responseAudio.src = audioUrl;
+                }
+
+                this.elements.results.style.display = 'block';
+                this.enableControls(true);
+            }
+
+            handleError(message) {
+                this.addStatusMessage('❌', `Error: ${message.message}`, 'error');
+                this.enableControls(true);
+            }
+
+            async uploadAudioFile() {
+                const file = this.elements.audioFile.files[0];
+                if (!file || !this.ws) return;
+
+                this.enableControls(false);
+                this.elements.results.style.display = 'none';
+
+                try {
+                    const audioData = await this.fileToBase64(file);
+                    this.sendMessage({
+                        type: 'audio_upload',
+                        audio_data: audioData.split(',')[1] // Remove data:audio/...;base64, prefix
+                    });
+                } catch (error) {
+                    this.addStatusMessage('❌', `Upload failed: ${error.message}`, 'error');
+                    this.enableControls(true);
+                }
+            }
+
+            async startRecording() {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    this.mediaRecorder = new MediaRecorder(stream);
+                    this.recordedChunks = [];
+
+                    this.mediaRecorder.ondataavailable = (event) => {
+                        if (event.data.size > 0) {
+                            this.recordedChunks.push(event.data);
+                        }
+                    };
+
+                    this.mediaRecorder.onstop = () => {
+                        this.processRecording();
+                    };
+
+                    this.mediaRecorder.start();
+                    this.isRecording = true;
+                    this.elements.recordBtn.classList.add('recording');
+                    this.elements.recordBtn.textContent = '⏹️';
+                    this.elements.recordStatus.textContent = 'Recording... Click to stop';
+                    this.addStatusMessage('🎙️', 'Recording started', 'info');
+
+                } catch (error) {
+                    console.error('Recording error:', error);
+                    this.addStatusMessage('❌', 'Microphone access denied', 'error');
+                }
+            }
+
+            stopRecording() {
+                if (this.mediaRecorder && this.isRecording) {
+                    this.mediaRecorder.stop();
+                    this.isRecording = false;
+                    this.elements.recordBtn.classList.remove('recording');
+                    this.elements.recordBtn.textContent = '🎙️';
+                    this.elements.recordStatus.textContent = 'Processing recording...';
+
+                    // Stop all tracks
+                    const tracks = this.mediaRecorder.stream.getTracks();
+                    tracks.forEach(track => track.stop());
+                }
+            }
+
+            async processRecording() {
+                if (this.recordedChunks.length === 0) return;
+
+                this.enableControls(false);
+                this.elements.results.style.display = 'none';
+
+                try {
+                    const blob = new Blob(this.recordedChunks, { type: 'audio/webm' });
+                    const audioData = await this.blobToBase64(blob);
+
+                    this.sendMessage({
+                        type: 'audio_upload',
+                        audio_data: audioData.split(',')[1] // Remove data:audio/...;base64, prefix
+                    });
+                } catch (error) {
+                    this.addStatusMessage('❌', `Recording processing failed: ${error.message}`, 'error');
+                    this.enableControls(true);
+                } finally {
+                    this.elements.recordStatus.textContent = 'Click to start recording';
+                }
+            }
+
+            textToSpeech() {
+                const text = this.elements.textInput.value.trim();
+                if (!text || !this.ws) return;
+
+                this.enableControls(false);
+                this.elements.results.style.display = 'none';
+
+                this.sendMessage({
+                    type: 'text_to_speech',
+                    text: text
+                });
+            }
+
+            sendMessage(message) {
+                if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                    this.ws.send(JSON.stringify(message));
+                } else {
+                    this.addStatusMessage('❌', 'Not connected to server', 'error');
+                }
+            }
+
+            updateConnectionStatus(status, text) {
+                this.elements.connectionStatus.className = `connection-status ${status}`;
+                this.elements.connectionStatus.textContent = text;
+            }
+
+            addStatusMessage(icon, text, type = 'info') {
+                const statusItem = document.createElement('div');
+                statusItem.className = 'status-item';
+                statusItem.innerHTML = `
+                    <span class="status-icon">${icon}</span>
+                    <span class="status-text">${text}</span>
+                    <span class="status-time">${new Date().toLocaleTimeString()}</span>
+                `;
+
+                this.elements.statusList.insertBefore(statusItem, this.elements.statusList.firstChild);
+
+                // Keep only last 10 messages
+                while (this.elements.statusList.children.length > 10) {
+                    this.elements.statusList.removeChild(this.elements.statusList.lastChild);
+                }
+            }
+
+            enableControls(enabled) {
+                this.elements.uploadBtn.disabled = !enabled || !this.elements.audioFile.files[0];
+                this.elements.ttsBtn.disabled = !enabled || !this.elements.textInput.value.trim();
+                // Recording button should always be available when connected
+                this.elements.recordBtn.disabled = !enabled && !this.isRecording;
+            }
+
+            fileToBase64(file) {
+                return new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.readAsDataURL(file);
+                    reader.onload = () => resolve(reader.result);
+                    reader.onerror = error => reject(error);
+                });
+            }
+
+            blobToBase64(blob) {
+                return new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.readAsDataURL(blob);
+                    reader.onload = () => resolve(reader.result);
+                    reader.onerror = error => reject(error);
+                });
+            }
+
+            base64ToBlob(base64, mimeType) {
+                const byteCharacters = atob(base64);
+                const byteNumbers = new Array(byteCharacters.length);
+                for (let i = 0; i < byteCharacters.length; i++) {
+                    byteNumbers[i] = byteCharacters.charCodeAt(i);
+                }
+                const byteArray = new Uint8Array(byteNumbers);
+                return new Blob([byteArray], { type: mimeType });
+            }
+
+            // Keepalive ping
+            startKeepAlive() {
+                setInterval(() => {
+                    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                        this.sendMessage({ type: 'ping' });
+                    }
+                }, 30000); // Ping every 30 seconds
+            }
+        }
+
+        // Initialize the application
+        window.addEventListener('load', () => {
+            const app = new VoiceAssistantWebSocket();
+            app.startKeepAlive();
+        });
+    </script>
+</body>
+</html>
