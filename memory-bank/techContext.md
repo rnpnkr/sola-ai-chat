@@ -1,25 +1,36 @@
 # Tech Context
 
 ## Technologies Used
-- Frontend/Mobile: bolt.new, React Native (planned), React (used for basic frontend structure), HTML5 Canvas (for visualization)
-- Backend/AI: Eleven Labs (voice), FastAPI (web server), WebSockets (via FastAPI/uvicorn), `custom_audio_interface.py` (for audio streaming), mem0 (planned), Supabase (planned), OpenAI/Anthropic (planned), Pinecone/Weaviate (planned), PyAudio (used by DefaultAudioInterface/WaveformAudioInterface)
+- Frontend/Mobile: React Native (planned), React (for web prototype), HTML5 Canvas (for visualization)
+- Backend/AI: FastAPI (web server), WebSockets (via FastAPI/uvicorn), Deepgram (STT), ElevenLabs (TTS), LangGraph (agent orchestration), Mem0 (memory), Supabase (vector DB for RAG), OpenRouter/OpenAI/Anthropic (LLMs), PyAudio (legacy audio interface)
 - Additional Services: RevenueCat (planned), Sentry (planned), Analytics (planned)
 
+## LangGraph Implementation Clarifications (Context7 MCP)
+- Use `StateGraph` from `langgraph.graph` to define the pipeline state and nodes.
+- Each node (STT, LLM, TTS) can be a function (sync or async) that receives the state and returns a dict with updated state keys.
+- For streaming, use `stream_mode="messages"` to stream LLM tokens, `stream_mode="values"` for full state after each node, and `stream_mode="updates"` for incremental state changes.
+- Use `graph.astream()` for async streaming (Python <3.11: pass `config` through node functions for context/callbacks).
+- To stream custom data (e.g., audio chunks), use `get_stream_writer()` inside a node and emit data when `stream_mode="custom"` is set.
+- Nodes can be chained sequentially or in parallel; edges define execution order.
+- Integration with external services (Deepgram, ElevenLabs) is done inside node functions, which can be async and yield/emit data as needed.
+- Metadata in streaming output includes the node name (`langgraph_node`) for filtering.
+- Best practice: keep node return values as dicts matching the state schema; handle errors gracefully in each node.
+
 ## Development Setup
-- Requires both Python and Node.js environments.
-- Backend dependencies managed with `pip` and `requirements.txt`.
-- Frontend dependencies managed with `npm` or `yarn` and `package.json`.
-- Backend runs using `uvicorn`.
-- Frontend runs using `react-scripts`.
-- Environment variables (`.env`) required for ElevenLabs API key and Agent ID.
+- Python backend dependencies managed with `pip` and `requirements.txt` (see PRD for new packages: langgraph, mem0ai, supabase, langchain, etc.).
+- Node.js frontend dependencies managed with `npm` or `yarn`.
+- Backend runs with `uvicorn`.
+- Environment variables required for Mem0, Supabase, agent config, and RAG (see .env.example in PRD).
+- Supabase database schema for therapeutic content and user sessions (see PRD).
 
 ## Technical Constraints
-- Real-time processing for voice remains a key constraint.
-- Efficient memory management for long-term context (mem0 integration).
-- Ensuring privacy and security of user data.
-- ElevenLabs Python SDK limitations regarding direct audio output tracking and explicit state callbacks necessitate workarounds.
-- Frontend waveform visualization requires processing raw audio data stream via Web Audio API (for web) or native audio APIs (for mobile).
+- Real-time, low-latency processing for voice and RAG (<150ms personality, <800ms RAG).
+- Efficient, persistent memory management for multi-session context (Mem0 integration).
+- Secure, encrypted storage and transmission of all user data (privacy and HIPAA compliance).
+- Modular, testable backend structure (agents, memory, rag, crisis detection).
+- WebSocket-based communication for all state, memory, and safety events.
+- ElevenLabs Python SDK limitations for direct audio output tracking (legacy workaround, to be improved).
 
 ## Dependencies
-- Backend: `elevenlabs`, `fastapi`, `uvicorn`, `python-multipart`, `python-dotenv`, `pyaudio`
+- Backend: `fastapi`, `uvicorn`, `python-multipart`, `python-dotenv`, `pyaudio`, `elevenlabs`, `deepgram-sdk`, `langgraph`, `mem0ai`, `supabase`, `langchain`, `langchain-openai`, `pydantic`, `fastapi-utils`, `asyncpg`
 - Frontend: `react`, `react-dom`, `react-scripts`, Web Audio API (for visualization on web)

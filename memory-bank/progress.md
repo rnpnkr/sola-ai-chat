@@ -1,46 +1,52 @@
 # Progress
 
 ## What works
-- The basic project structure is defined in `README.md`.
-- The `memory-bank` directory and initial core files have been created and updated.
-- A basic FastAPI backend (`backend/main.py`) is set up to run the ElevenLabs conversation.
-- The ElevenLabs conversation logic in `backend/elevenlabs_service.py` is refactored to be importable and includes timer-based state tracking (IDLE, SPEAKING, LISTENING, THINKING).
-- A WebSocket endpoint (`/ws`) in the backend sends state updates to connected clients.
-- A basic React frontend (`frontend/`) is set up with waveform visualization components.
-- The frontend connects to the backend WebSocket and receives state updates.
-- The frontend waveform visualization is triggered by the `SPEAKING` state received from the backend.
-- Audio input and output through the backend's default audio interface are working.
-- Implemented `backend/custom_audio_interface.py` (`WaveformAudioInterface`) to stream raw audio data to the frontend via WebSocket.
+- Core backend and frontend structure for real-time state communication and basic waveform visualization is established.
+- FastAPI backend streams raw audio data and conversation state to frontend via WebSocket.
+- ElevenLabs conversation logic with timer-based state tracking is functional.
+- Initial React frontend with waveform visualization and WebSocket integration is working.
+- Project brief, product context, and system patterns updated for new vision.
 
 ## What's left to build
-- Full implementation of all features outlined in `README.md`.
-- Refining frontend state handling for all conversation states.
-- Implementing real-time audio streaming from backend to frontend for accurate waveform visualization based on actual audio data.
-- Error handling and robust session management for WebSocket connections.
-- User interface for conversation input and output in the frontend.
-- Integration with other services (mem0, Supabase, etc.).
-- Comprehensive testing.
-- Frontend implementation of real-time waveform visualization using streamed audio data (requires further work to process raw data and draw).
+- Phase 1: Foundation
+  - LangGraph orchestrator setup
+  - Basic personality agent framework
+  - Mem0 service integration
+  - Enhanced WebSocket message handling (personality, memory, crisis)
+- Phase 2: Personality & Memory
+  - 4 distinct agent personalities
+  - Persistent memory across sessions (Mem0)
+  - User profile management
+  - Personality selection/switching
+- Phase 3: Self-RAG Integration
+  - Supabase therapeutic knowledge base
+  - Self-RAG service implementation
+  - Adaptive retrieval logic and citation tracking
+- Phase 4: Safety & Crisis Management
+  - Crisis detection system and risk assessment
+  - Escalation protocols and safety dashboard
+- Phase 5: Optimization & Testing
+  - Latency optimization (<150ms personality, <800ms RAG)
+  - Comprehensive testing suite and performance monitoring
+  - Production deployment
 
 ## Current status
-- Core backend and frontend structure for real-time state communication and basic waveform visualization is established.
-- The project is progressing from foundational setup to initial feature implementation.
-- Backend is successfully streaming raw audio data.
+- Project is transitioning from foundational setup to Self-RAG + LangGraph + Mem0 architecture.
+- Immediate focus is on backend restructuring, dependency setup, and initial agent/memory modules.
+- Documentation and planning updated to align with new PRD.
 
 ## Known issues
-- State tracking for SPEAKING and IDLE relies on estimated duration/silence timeouts due to ElevenLabs Python SDK limitations, which may not be perfectly accurate.
-- Waveform visualization is currently based on a placeholder audio element, not the actual ElevenLabs audio stream.
-- WebSocket session management is basic (one conversation instance shared).
-- Error handling for network issues or API problems needs improvement.
-- Potential timing issues with state transitions based on timer values.
-- The THINKING state transition currently relies on a timer after user speech; a more direct signal might be needed if available from the SDK in the future.
-- Frontend implementation of waveform visualization from raw streamed audio data is not yet functional.
-- Browser autoplay policies may prevent the AudioContext from starting without a direct user gesture, impacting frontend visualization initialization.
+- State tracking for SPEAKING/IDLE relies on timer-based estimation (legacy workaround).
+- WebSocket session management is basic; needs robust multi-session support.
+- No persistent memory or RAG yet; to be implemented in upcoming phases.
+- No crisis detection or escalation logic yet.
+- Frontend waveform visualization is not yet based on actual ElevenLabs audio stream.
+- Error handling and compliance (HIPAA, privacy) need to be enforced in new modules.
 
 ## Next steps
-- Continue implementing real-time audio streaming from backend to frontend for accurate waveform visualization based on actual audio data.
-- Refine frontend state handling for all conversation states.
-- Implement user interface for conversation input and output in the frontend.
-- Integrate with other services (mem0, Supabase, etc.).
-- Conduct comprehensive testing.
-- Address remaining known issues and refine implementation. 
+- Add new dependencies and environment variables for Mem0, LangGraph, Supabase, etc.
+- Create backend/agents, backend/memory, backend/rag modules and stubs.
+- Implement initial LangGraph orchestrator and Mem0 service integration.
+- Update WebSocket handling for new message types.
+- Begin basic agent personality implementation.
+- Continue phased rollout as per PRD. 

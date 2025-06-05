@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LangGraph Voice Assistant Test</title>
+    <style>
+        body { font-family: 'Segoe UI', Arial, sans-serif; background: #f7f9fa; margin: 0; padding: 0; }
+        .container { max-width: 700px; margin: 40px auto; background: #fff; border-radius: 12px; box-shadow: 0 2px 12px #0001; padding: 32px; }
+        h1 { text-align: center; color: #2a3b4c; }
+        .status, .connection { margin: 12px 0; font-weight: bold; }
+        .status span, .connection span { padding: 4px 10px; border-radius: 6px; }
+        .status .ok { background: #e0ffe0; color: #1a7f1a; }
+        .status .err { background: #ffe0e0; color: #b00; }
+        .status .info { background: #e0eaff; color: #1a3b7f; }
+        .controls { display: flex; gap: 12px; margin: 18px 0; justify-content: center; }
+        button, select { font-size: 1rem; padding: 8px 18px; border-radius: 6px; border: 1px solid #bbb; background: #f5f7fa; cursor: pointer; }
+        button:active { background: #e0eaff; }
+        .streaming, .transcript, .metrics, .debug, .audio-player { margin: 18px 0; }
+        .streaming { min-height: 32px; font-size: 1.1rem; background: #f0f6ff; border-radius: 6px; padding: 10px; }
+        .transcript { font-size: 1.05rem; color: #444; background: #f9f9f9; border-radius: 6px; padding: 10px; }
+        .metrics { font-size: 0.95rem; color: #555; }
+        .audio-player { display: flex; align-items: center; gap: 10px; }
+        .debug { background: #222; color: #b5f7ff; font-size: 0.9rem; border-radius: 6px; padding: 10px; max-height: 180px; overflow-y: auto; }
+        .hidden { display: none; }
+        .error { color: #b00; font-weight: bold; }
+        .success { color: #1a7f1a; font-weight: bold; }
+        .row { display: flex; gap: 10px; align-items: center; }
+        .row label { min-width: 120px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>LangGraph Voice Assistant Test</h1>
+        <div class="connection status"><span id="conn-status" class="info">Connecting...</span></div>
+        <div class="status"><span id="pipeline-status" class="info">Idle</span></div>
+        <div class="controls">
+            <button id="record-btn">🎤 Start Recording</button>
+            <button id="clear-btn">🧹 Clear Logs</button>
+            <label class="row"><input type="checkbox" id="test-mode"> Test Mode</label>
+            <select id="model-select">
+                <option value="gpt-3.5-turbo">gpt-3.5-turbo</option>
+                <option value="gpt-4o">gpt-4o</option>
+                <option value="gpt-4">gpt-4</option>
+            </select>
+                </div>
+        <div class="metrics">
+            <div>STT: <span id="stt-time">-</span> | LLM: <span id="llm-time">-</span> | TTS: <span id="tts-time">-</span> | Total: <span id="total-time">-</span></div>
+        </div>
+        <div class="transcript"><b>Transcript:</b> <span id="transcript"></span></div>
+        <div class="streaming"><b>Streaming Response:</b> <span id="streaming-response"></span></div>
+        <div class="audio-player">
+            <audio id="audio" controls></audio>
+        </div>
+        <div class="debug">
+            <b>Debug Panel</b>
+            <pre id="debug-log"></pre>
+        </div>
+        <div class="error" id="error-msg"></div>
+    </div>
+    <script>
+        // --- Config ---
+        const WS_URL = () => `ws://${location.hostname}:8000/ws/${getClientId()}`;
+        let ws, mediaRecorder, audioChunks = [], isRecording = false, testMode = false;
+        let sttStart, llmStart, ttsStart, totalStart;
+        let model = 'gpt-3.5-turbo';
+        function getClientId() {
+            let cid = localStorage.getItem('client_id');
+            if (!cid) {
+                cid = crypto.randomUUID();
+                localStorage.setItem('client_id', cid);
+            }
+            return cid;
+        }
+        function logDebug(msg) {
+            const log = document.getElementById('debug-log');
+            log.textContent += `[${new Date().toLocaleTimeString()}] ${msg}\n`;
+            log.scrollTop = log.scrollHeight;
+        }
+        function setStatus(msg, type='info') {
+            const el = document.getElementById('pipeline-status');
+            el.textContent = msg;
+            el.className = type;
+        }
+        function setConnStatus(msg, type='info') {
+            const el = document.getElementById('conn-status');
+            el.textContent = msg;
+            el.className = type;
+        }
+        function setError(msg) {
+            document.getElementById('error-msg').textContent = msg;
+        }
+        function clearUI() {
+            document.getElementById('transcript').textContent = '';
+            document.getElementById('streaming-response').textContent = '';
+            document.getElementById('audio').src = '';
+            document.getElementById('debug-log').textContent = '';
+            setError('');
+            setStatus('Idle', 'info');
+            document.getElementById('stt-time').textContent = '-';
+            document.getElementById('llm-time').textContent = '-';
+            document.getElementById('tts-time').textContent = '-';
+            document.getElementById('total-time').textContent = '-';
+        }
+        // --- WebSocket ---
+        function connectWS() {
+            ws = new WebSocket(WS_URL());
+            ws.onopen = () => {
+                setConnStatus('Connected', 'ok');
+                logDebug('WebSocket connected');
+            };
+            ws.onclose = () => {
+                setConnStatus('Disconnected', 'err');
+                logDebug('WebSocket disconnected. Reconnecting in 2s...');
+                setTimeout(connectWS, 2000);
+            };
+            ws.onerror = (e) => {
+                setConnStatus('Error', 'err');
+                setError('WebSocket error');
+                logDebug('WebSocket error: ' + e.message);
+            };
+            ws.onmessage = (event) => {
+                let msg;
+                try { msg = JSON.parse(event.data); } catch { logDebug('Invalid JSON: ' + event.data); return; }
+                // Redact audio_data from debug log
+                let debugMsg = { ...msg };
+                if (debugMsg.audio_data) debugMsg.audio_data = '[redacted]';
+                logDebug('Received: ' + JSON.stringify(debugMsg));
+                if (msg.type === 'status') {
+                    setStatus(msg.status, 'info');
+                    if (msg.status === 'recording_complete') totalStart = Date.now();
+                    if (msg.status === 'stt_processing') sttStart = Date.now();
+                    if (msg.status === 'llm_streaming') llmStart = Date.now();
+                    if (msg.status === 'tts_generating') ttsStart = Date.now();
+                    if (msg.status === 'transcription_complete' && sttStart) {
+                        document.getElementById('stt-time').textContent = ((Date.now()-sttStart)/1000).toFixed(2)+'s';
+                        document.getElementById('transcript').textContent = msg.transcript || '';
+                    }
+                    if (msg.status === 'response_generated' && llmStart) {
+                        document.getElementById('llm-time').textContent = ((Date.now()-llmStart)/1000).toFixed(2)+'s';
+                    }
+                    if (msg.status === 'completed' && ttsStart) {
+                        document.getElementById('tts-time').textContent = ((Date.now()-ttsStart)/1000).toFixed(2)+'s';
+                    }
+                    if (msg.status === 'pipeline_complete' && totalStart) {
+                        document.getElementById('total-time').textContent = ((Date.now()-totalStart)/1000).toFixed(2)+'s';
+                    }
+                } else if (msg.type === 'token_stream') {
+                    const el = document.getElementById('streaming-response');
+                    el.textContent += msg.content;
+                } else if (msg.type === 'result') {
+                    document.getElementById('transcript').textContent = msg.transcript || '';
+                    document.getElementById('streaming-response').textContent = msg.ai_response || '';
+                    if (msg.audio_data) {
+                        const audio = document.getElementById('audio');
+                        audio.src = 'data:audio/mp3;base64,' + msg.audio_data;
+                        audio.play();
+                    }
+                    setStatus('Pipeline complete', 'ok');
+                } else if (msg.type === 'error') {
+                    setError(msg.message);
+                    setStatus('Error', 'err');
+                }
+            };
+            // Heartbeat
+            setInterval(() => { if (ws.readyState === 1) ws.send(JSON.stringify({type: 'ping'})); }, 30000);
+        }
+        connectWS();
+        // --- Audio Recording ---
+        async function startRecording() {
+            if (!navigator.mediaDevices || !window.MediaRecorder) {
+                setError('MediaRecorder not supported');
+                return;
+            }
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: 16000, channelCount: 1 } });
+                mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+                audioChunks = [];
+                mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
+                mediaRecorder.onstop = async () => {
+                    setStatus('Processing...', 'info');
+                    const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                    // Convert to WAV (using browser API or fallback to webm if not possible)
+                    const arrayBuffer = await audioBlob.arrayBuffer();
+                    // For simplicity, send as webm base64 (backend must handle conversion to WAV/PCM)
+                    const base64Audio = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+                    ws.send(JSON.stringify({
+                        type: 'langgraph_stream',
+                        audio_data: base64Audio,
+                        model: model
+                    }));
+                    setStatus('Audio sent', 'info');
+                };
+                mediaRecorder.start();
+                isRecording = true;
+                document.getElementById('record-btn').textContent = '⏹ Stop Recording';
+                setStatus('Recording...', 'info');
+            } catch (err) {
+                setError('Microphone access denied');
+                setStatus('Error', 'err');
+            }
+        }
+        function stopRecording() {
+            if (mediaRecorder && isRecording) {
+                mediaRecorder.stop();
+                isRecording = false;
+                document.getElementById('record-btn').textContent = '🎤 Start Recording';
+            }
+        }
+        document.getElementById('record-btn').onclick = () => {
+            if (!isRecording) startRecording();
+            else stopRecording();
+        };
+        document.getElementById('clear-btn').onclick = clearUI;
+        document.getElementById('test-mode').onchange = e => { testMode = e.target.checked; };
+        document.getElementById('model-select').onchange = e => { model = e.target.value; };
+    </script>
+</body>
+</html>

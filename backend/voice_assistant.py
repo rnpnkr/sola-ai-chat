@@ -1,6 +1,6 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, FileResponse
 import asyncio
 import json
 import base64
@@ -9,11 +9,14 @@ import tempfile
 import os
 from typing import Dict, Optional
 import logging
+logger = logging.getLogger(__name__)
 
 # Import your existing services
-from deepgram_service import DeepgramService
-from ai_service import OpenRouterService
+from services.deepgram_service import DeepgramService
+from services.ai_service import OpenRouterService
 from tts_service import ElevenLabsService
+from agents.langgraph_orchestrator import langgraph_pipeline
+from agents.personality_agent import PersonalityAgent, silica_config
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -21,6 +24,7 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="WebSocket Voice Assistant")
 
+app.mount("/static", StaticFiles(directory="."), name="static")
 
 class ConnectionManager:
     def __init__(self):
@@ -68,6 +72,8 @@ class VoiceAssistantWebSocket:
         self.stt_service = DeepgramService()
         self.ai_service = OpenRouterService()
         self.tts_service = ElevenLabsService()
+        self.langgraph_pipeline = langgraph_pipeline
+        self.personality_agent = PersonalityAgent(silica_config)
 
     async def process_audio_stream(self, client_id: str, audio_data: bytes):
         """Process audio with real-time status updates"""
@@ -83,7 +89,7 @@ class VoiceAssistantWebSocket:
                 f.write(audio_data)
 
             # Step 1: Speech to Text
-            await manager.send_status(client_id, "transcribing")
+            await manager.send_status(client_id, "stt_processing")
             transcript = await asyncio.to_thread(
                 self.stt_service.transcribe, input_path
             )
@@ -96,7 +102,7 @@ class VoiceAssistantWebSocket:
                                       {"transcript": transcript})
 
             # Step 2: Get AI Response
-            await manager.send_status(client_id, "generating_response")
+            await manager.send_status(client_id, "llm_streaming")
             ai_response = await asyncio.to_thread(
                 self.ai_service.get_response, transcript
             )
@@ -109,7 +115,7 @@ class VoiceAssistantWebSocket:
                                       {"ai_response": ai_response})
 
             # Step 3: Text to Speech
-            await manager.send_status(client_id, "generating_speech")
+            await manager.send_status(client_id, "tts_generating")
             output_file = await asyncio.to_thread(
                 self.tts_service.text_to_speech, ai_response, output_path
             )
@@ -130,7 +136,7 @@ class VoiceAssistantWebSocket:
                 "session_id": session_id
             })
 
-            await manager.send_status(client_id, "completed")
+            await manager.send_status(client_id, "pipeline_complete")
 
         except Exception as e:
             logger.error(f"Processing error for client {client_id}: {e}")
@@ -185,6 +191,49 @@ class VoiceAssistantWebSocket:
                 except Exception as e:
                     logger.warning(f"Failed to cleanup {output_path}: {e}")
 
+    async def process_audio_with_langgraph(self, client_id: str, audio_data: bytes):
+        """Process audio using LangGraph with DUAL streaming"""
+        try:
+            # Send recording_complete status for total time measurement
+            await manager.send_status(client_id, "recording_complete")
+            initial_state = {
+                "audio_input": audio_data,
+                "transcript": "",
+                "ai_response": "",
+                "audio_output": b"",
+                "personality_type": "neo",
+                "client_id": client_id
+            }
+            # Pass manager through config for WebSocket updates
+            config = {
+                "configurable": {
+                    "manager": manager,
+                    "client_id": client_id
+                }
+            }
+            # Stream mode "values" for node completion
+            async for chunk in self.langgraph_pipeline.astream(
+                initial_state,
+                stream_mode="values",
+                config=config
+            ):
+                # Node completion updates
+                if chunk.get("transcript") and not chunk.get("ai_response"):
+                    await manager.send_status(client_id, "transcription_complete", {"transcript": chunk["transcript"]})
+                elif chunk.get("ai_response") and not chunk.get("audio_output"):
+                    await manager.send_status(client_id, "response_generated", {"ai_response": chunk["ai_response"]})
+                elif chunk.get("audio_output"):
+                    await manager.send_result(client_id, {
+                        "transcript": chunk["transcript"],
+                        "ai_response": chunk["ai_response"],
+                        "audio_data": base64.b64encode(chunk["audio_output"]).decode('utf-8'),
+                        "session_id": str(uuid.uuid4())
+                    })
+                    await manager.send_status(client_id, "completed")
+        except Exception as e:
+            logger.error(f"LangGraph processing error: {e}")
+            await manager.send_error(client_id, f"LangGraph failed: {str(e)}")
+
 
 assistant = VoiceAssistantWebSocket()
 
@@ -218,6 +267,10 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                 else:
                     await manager.send_error(client_id, "No text provided")
 
+            elif message_type == "langgraph_stream":
+                audio_data = base64.b64decode(message["audio_data"])
+                await assistant.process_audio_with_langgraph(client_id, audio_data)
+
             elif message_type == "ping":
                 # Handle ping/keepalive
                 await manager.send_message(client_id, {"type": "pong"})
@@ -243,20 +296,8 @@ async def health_check():
 
 @app.get("/")
 async def get_homepage():
-    return HTMLResponse("""
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>WebSocket Voice Assistant</title>
-    </head>
-    <body>
-        <h1>WebSocket Voice Assistant</h1>
-        <p>Connect to WebSocket endpoint: <code>ws://localhost:8000/ws/{client_id}</code></p>
-        <p>Replace {client_id} with a unique identifier for your session.</p>
-        <p>Check <a href="/health">/health</a> for server status.</p>
-    </body>
-    </html>
-    """)
+    # Serve the new index.html instead of HTML string
+    return FileResponse("index.html")
 
 
 if __name__ == "__main__":

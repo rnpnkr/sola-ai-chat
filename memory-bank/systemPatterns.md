@@ -1,28 +1,32 @@
 # System Patterns
 
 ## System Architecture
-- Client-server architecture with a React frontend and a FastAPI Python backend.
+- Modular backend with agents (personalities), memory (Mem0), RAG (Self-RAG/Supabase), and crisis detection components.
+- LangGraph orchestrator coordinates voice input, agent selection, memory retrieval, RAG, and crisis detection.
+- Real-time, low-latency voice pipeline: Deepgram STT → LangGraph Agent → ElevenLabs TTS.
+- Persistent memory and adaptive retrieval for multi-session continuity and therapeutic support.
+- WebSocket-based real-time communication for state, memory, and safety events.
 
 ## Key Technical Decisions
-- Voice-first interaction design.
-- Use of advanced memory management (`mem0`) (planned).
-- Integration of multiple LLMs (`OpenAI/Anthropic`) (planned).
-- Vector database for RAG (`Pinecone/Weaviate`) (planned).
-- **Real-time conversation state communication via WebSockets.**
-- **Real-time audio data streaming for visualization via WebSockets.**
+- Use LangGraph for agent orchestration and workflow management.
+- Integrate Mem0 for efficient, persistent memory and context retrieval.
+- Use Supabase as the vector database for therapeutic knowledge and RAG.
+- Implement agent personalities as modular classes with distinct traits and response logic.
+- Add crisis detection and escalation as a core safety layer.
+- Prioritize modularity, testability, and compliance in all new modules.
 
 ## Design Patterns in Use
-- **State Management:** Backend (`ConversationStateManager`) tracks conversation state (IDLE, SPEAKING, LISTENING, THINKING) and sends updates to the frontend via WebSocket.
-- **Timer-based State Inference:** A workaround pattern in the backend to estimate states (especially SPEAKING duration) due to ElevenLabs Python SDK limitations.
-- Asynchronous communication patterns (using `asyncio` and `threading` to bridge synchronous SDK callbacks with the async web server).
-- Component patterns in frontend for audio analysis and visualization (`AudioVisualizer`, `AudioAnalyzer`, `WaveformCanvas`).
-- **Custom Audio Interface (`WaveformAudioInterface`):** Intercepts and forwards audio output.
-- **Audio Data Streaming:** Backend streams raw audio data to the frontend for visualization.
+- Orchestrator pattern (LangGraph) for managing multi-agent workflows.
+- Strategy pattern for agent personality selection and response formatting.
+- Adapter pattern for integrating Mem0 and Supabase with backend logic.
+- Observer pattern for real-time WebSocket state and event updates.
+- Asynchronous, event-driven communication throughout backend.
+- Timer-based state inference for audio output (legacy, to be improved with new SDKs).
 
 ## Component Relationships
-- Frontend (React) communicates with Backend (FastAPI).
-- **WebSocket connection (`/ws`) is used for real-time state updates from Backend to Frontend.**
-- Backend integrates Eleven Labs (voice), and will integrate mem0, Supabase, LLMs, Vector DBs (planned).
-- Frontend includes components for audio visualization driven by backend state.
-- Additional services like RevenueCat, Sentry, Analytics are integrated with frontend/backend as needed (planned).
-- `WaveformAudioInterface` interacts with `ConversationStateManager` to send audio data via WebSocket. 
+- Voice input (Deepgram) feeds into LangGraph orchestrator.
+- Orchestrator selects agent personality, queries Mem0 for context, and triggers RAG if needed.
+- Self-RAG retrieves therapeutic content from Supabase as required.
+- Crisis detector monitors all messages and triggers escalation if risk detected.
+- ElevenLabs TTS generates voice output for agent responses.
+- WebSocket layer communicates all state, memory, and safety events to frontend clients. 
