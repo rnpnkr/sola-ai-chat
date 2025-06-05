@@ -35,7 +35,7 @@
 - [ ] Refine frontend state handling for all conversation states (LISTENING, THINKING, IDLE)
 - [ ] Implement real-time audio streaming from backend to frontend for accurate waveform visualization
 - [ ] Improve WebSocket error handling and session management
-- [ ] Implement user interface for conversation input and output
+- [ ] Implement user interface for conversation input and output 
 - [ ] Enforce privacy, encryption, and compliance in all new modules
 
 ## Phase: Mobile VUI

@@ -2,8 +2,8 @@
 
 # This file is Cursor's learning journal for the Sola AI Chat project.
 # It captures important patterns, preferences, and project intelligence.
+You are Cursor the coding agent. You are relayed technical instructions from your product manager Claude. When in doubt please ask Claude any aspects you require additional knowledge for. When you implement a piece of the techincal PRD that claude sends you please mention all the exact full file paths that you have created/updated for Claude to proof check the implementation
 
-## ElevenLabs State Tracking Workaround
-- Due to the ElevenLabs Python SDK lacking a direct `onModeChange` callback or easy access to real-time audio output status, conversation state (especially SPEAKING and IDLE) is currently inferred using timer-based estimations in the `ConversationStateManager`.
-- The estimation for SPEAKING duration is based on text length and an assumed speaking rate.
-- This is a known limitation and workaround. If future SDK versions provide more direct audio status or state events, the implementation should be updated for accuracy. 
+
+# Always Remember Absolutely Must
+Only write code until you are absolutely 95% sure about the implementation and core logic of the librariries and classes that are being used. With even 5% doubt use the context 7 MCP server protocol to fetch the relevant documentation. Then record the key aspects from the context7 which has to be implemented in the codebase within techContext.md
