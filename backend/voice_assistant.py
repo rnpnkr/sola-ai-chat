@@ -16,7 +16,7 @@ from services.deepgram_service import DeepgramService
 from services.ai_service import OpenRouterService
 from tts_service import ElevenLabsService
 from agents.langgraph_orchestrator import langgraph_pipeline
-from agents.personality_agent import PersonalityAgent, silica_config
+from agents.personality_agent import PersonalityAgent, neo_config
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -73,7 +73,7 @@ class VoiceAssistantWebSocket:
         self.ai_service = OpenRouterService()
         self.tts_service = ElevenLabsService()
         self.langgraph_pipeline = langgraph_pipeline
-        self.personality_agent = PersonalityAgent(silica_config)
+        self.personality_agent = PersonalityAgent(neo_config)
 
     async def process_audio_stream(self, client_id: str, audio_data: bytes):
         """Process audio with real-time status updates"""

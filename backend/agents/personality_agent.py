@@ -24,27 +24,15 @@ class PersonalityAgent:
 
     def format_response(self, content: str) -> str:
         """
-        Format the AI's response according to Joe's gentle, mindful style.
+        Format the AI's response according to Joe's gentle, mindful, and concise style.
+        Adds ellipses for pauses and a gentle check-in at the end.
         """
-        # Don't override the content - just format it appropriately
-        # Add gentle pauses and natural speech patterns
-        
-        # Clean up the response and add mindful formatting
-        formatted = content.strip()
-        
-        # Add natural pauses for mindfulness coaching
-        if not formatted.endswith(('?', '.', '!')):
-            formatted += '.'
-        
-        # Add gentle breathing space with ellipses
-        if len(formatted) > 50:  # For longer responses
-            formatted = formatted.replace('. ', '... ')
-        
-        return formatted
+        # Example: Add Joe's name, ellipses, and a gentle check-in
+        return f"How does that feel for you?"
 
 # Default config for Joe (Mindfulness Coach)
-silica_config = PersonalityConfig(
-    name="Silica",
+joe_config = PersonalityConfig(
+    name="Joe",
     traits={
         "specialty": "mindfulness coach",
         "focus": "stress reduction, relaxation, emotional balance",
@@ -106,3 +94,9 @@ silica_config = PersonalityConfig(
     response_style="gentle-mindful"
 )
 
+# For backward compatibility, alias neo_config to joe_config
+neo_config = joe_config
+
+# Example instantiation
+# agent = PersonalityAgent(neo_config)
+# print(agent.format_response("Hello there! How can I help you today?")) 

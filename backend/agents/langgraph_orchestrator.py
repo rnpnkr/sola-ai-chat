@@ -65,13 +65,13 @@ async def llm_node(state: ConversationState, config=None):
     Integrates PersonalityAgent (Neo) for prompt enhancement and response formatting.
     """
     try:
-        from agents.personality_agent import PersonalityAgent, silica_config
+        from agents.personality_agent import PersonalityAgent, neo_config
         manager = config.get("configurable", {}).get("manager") if config else None
         client_id = state["client_id"]
         if manager:
             await manager.send_status(client_id, "llm_streaming")
         ai_service = OpenRouterService()
-        personality_agent = PersonalityAgent(silica_config)
+        personality_agent = PersonalityAgent(neo_config)
         enhanced_prompt = f"{personality_agent.system_prompt}\n\nUser: {state['transcript']}"
         logger.info(f"[{client_id}] LLM: Prompt: {enhanced_prompt}")
         response = ""
