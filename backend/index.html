@@ -27,6 +27,8 @@
         .success { color: #1a7f1a; font-weight: bold; }
         .row { display: flex; gap: 10px; align-items: center; }
         .row label { min-width: 120px; }
+        #test-streaming-btn { background: #e8f5e8; border-color: #5a9; }
+        #test-streaming-btn:active { background: #d0f0d0; }
     </style>
 </head>
 <body>
@@ -37,13 +39,14 @@
         <div class="controls">
             <button id="record-btn">🎤 Start Recording</button>
             <button id="clear-btn">🧹 Clear Logs</button>
+            <button id="test-streaming-btn">🧪 Test Streaming STT</button>
             <label class="row"><input type="checkbox" id="test-mode"> Test Mode</label>
             <select id="model-select">
                 <option value="gpt-3.5-turbo">gpt-3.5-turbo</option>
                 <option value="gpt-4o">gpt-4o</option>
                 <option value="gpt-4">gpt-4</option>
             </select>
-                </div>
+        </div>
         <div class="metrics">
             <div>STT: <span id="stt-time">-</span> | LLM: <span id="llm-time">-</span> | TTS: <span id="tts-time">-</span> | Total: <span id="total-time">-</span></div>
         </div>
@@ -101,6 +104,10 @@
             document.getElementById('llm-time').textContent = '-';
             document.getElementById('tts-time').textContent = '-';
             document.getElementById('total-time').textContent = '-';
+            sttStart = undefined;
+            llmStart = undefined;
+            ttsStart = undefined;
+            totalStart = undefined;
         }
         // --- WebSocket ---
         function connectWS() {
@@ -128,22 +135,35 @@
                 logDebug('Received: ' + JSON.stringify(debugMsg));
                 if (msg.type === 'status') {
                     setStatus(msg.status, 'info');
-                    if (msg.status === 'recording_complete') totalStart = Date.now();
+                    if (msg.status === 'recording_complete') {
+                        totalStart = Date.now();
+                        sttStart = undefined;
+                        llmStart = undefined;
+                        ttsStart = undefined;
+                    }
                     if (msg.status === 'stt_processing') sttStart = Date.now();
                     if (msg.status === 'llm_streaming') llmStart = Date.now();
                     if (msg.status === 'tts_generating') ttsStart = Date.now();
                     if (msg.status === 'transcription_complete' && sttStart) {
-                        document.getElementById('stt-time').textContent = ((Date.now()-sttStart)/1000).toFixed(2)+'s';
+                        const sttTime = Date.now() - sttStart;
+                        document.getElementById('stt-time').textContent = `${sttTime} ms`;
                         document.getElementById('transcript').textContent = msg.transcript || '';
                     }
                     if (msg.status === 'response_generated' && llmStart) {
-                        document.getElementById('llm-time').textContent = ((Date.now()-llmStart)/1000).toFixed(2)+'s';
+                        const llmTime = Date.now() - llmStart;
+                        document.getElementById('llm-time').textContent = `${llmTime} ms`;
                     }
                     if (msg.status === 'completed' && ttsStart) {
-                        document.getElementById('tts-time').textContent = ((Date.now()-ttsStart)/1000).toFixed(2)+'s';
+                        const ttsTime = Date.now() - ttsStart;
+                        document.getElementById('tts-time').textContent = `${ttsTime} ms`;
+                        if (totalStart) {
+                            const totalTime = Date.now() - totalStart;
+                            document.getElementById('total-time').textContent = `${totalTime} ms`;
+                        }
                     }
                     if (msg.status === 'pipeline_complete' && totalStart) {
-                        document.getElementById('total-time').textContent = ((Date.now()-totalStart)/1000).toFixed(2)+'s';
+                        const totalTime = Date.now() - totalStart;
+                        document.getElementById('total-time').textContent = `${totalTime} ms`;
                     }
                 } else if (msg.type === 'token_stream') {
                     const el = document.getElementById('streaming-response');
@@ -160,6 +180,26 @@
                 } else if (msg.type === 'error') {
                     setError(msg.message);
                     setStatus('Error', 'err');
+                } else if (msg.type === 'transcript_token') {
+                    // Real-time transcript tokens from streaming STT
+                    const transcriptEl = document.getElementById('transcript');
+                    const streamingEl = document.getElementById('streaming-response');
+                    // Do not pollute streaming response with transcript text; keep for agent response only
+                    transcriptEl.textContent = msg.token; // continuously update full transcript
+                    logDebug(`Live Token: "${msg.token}"`);
+                } else if (msg.type === 'stream_started') {
+                    setStatus('Streaming STT Started', 'info');
+                } else if (msg.type === 'speech_detected') {
+                    setStatus('Speech Detected', 'info');
+                    document.getElementById('streaming-response').textContent = '';
+                } else if (msg.type === 'speech_ended') {
+                    setStatus('Speech Ended - Processing', 'info');
+                } else if (msg.type === 'stt_streaming') {
+                    setStatus('STT Streaming Active', 'info');
+                    if (msg.partial_transcript) {
+                        const transcriptEl = document.getElementById('transcript');
+                        transcriptEl.textContent = msg.partial_transcript;
+                    }
                 }
             };
             // Heartbeat
@@ -184,12 +224,24 @@
                     const arrayBuffer = await audioBlob.arrayBuffer();
                     // For simplicity, send as webm base64 (backend must handle conversion to WAV/PCM)
                     const base64Audio = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+                    // Streaming flow: send start, chunks, end
                     ws.send(JSON.stringify({
-                        type: 'langgraph_stream',
-                        audio_data: base64Audio,
-                        model: model
+                        type: 'audio_stream_start',
+                        config: { sample_rate: 16000, channels: 1, format: 'webm' }
                     }));
-                    setStatus('Audio sent', 'info');
+                    // Send audio in chunks (simulate chunking for upload)
+                    const chunkSize = 4096; // or 2048 for PCM, but webm is variable
+                    for (let i = 0; i < base64Audio.length; i += chunkSize) {
+                        const chunk = base64Audio.slice(i, i + chunkSize);
+                        ws.send(JSON.stringify({
+                            type: 'audio_chunk',
+                            audio_data: chunk
+                        }));
+                    }
+                    ws.send(JSON.stringify({
+                        type: 'audio_stream_end'
+                    }));
+                    setStatus('Audio sent (streaming mode)', 'info');
                 };
                 mediaRecorder.start();
                 isRecording = true;
@@ -214,6 +266,171 @@
         document.getElementById('clear-btn').onclick = clearUI;
         document.getElementById('test-mode').onchange = e => { testMode = e.target.checked; };
         document.getElementById('model-select').onchange = e => { model = e.target.value; };
+        // Real-time streaming functionality with RAW audio
+        let streamingSession = null;
+        let audioContext = null;
+        let processor = null;
+        let streamingActive = false;
+
+        function createWAVHeader(dataLength, sampleRate = 16000, channels = 1, bitsPerSample = 16) {
+            const buffer = new ArrayBuffer(44);
+            const view = new DataView(buffer);
+            // WAV header
+            const writeString = (offset, string) => {
+                for (let i = 0; i < string.length; i++) {
+                    view.setUint8(offset + i, string.charCodeAt(i));
+                }
+            };
+            writeString(0, 'RIFF');
+            view.setUint32(4, 36 + dataLength, true); // File size
+            writeString(8, 'WAVE');
+            writeString(12, 'fmt ');
+            view.setUint32(16, 16, true); // PCM chunk size
+            view.setUint16(20, 1, true); // PCM format
+            view.setUint16(22, channels, true); // Channels
+            view.setUint32(24, sampleRate, true); // Sample rate
+            view.setUint32(28, sampleRate * channels * bitsPerSample / 8, true); // Byte rate
+            view.setUint16(32, channels * bitsPerSample / 8, true); // Block align
+            view.setUint16(34, bitsPerSample, true); // Bits per sample
+            writeString(36, 'data');
+            view.setUint32(40, dataLength, true); // Data size
+            return new Uint8Array(buffer);
+        }
+
+        async function startStreamingTest() {
+            if (streamingActive) {
+                stopStreamingTest();
+                return;
+            }
+
+            try {
+                // Initialize streaming session
+                streamingSession = {
+                    chunks: [],
+                    startTime: Date.now()
+                };
+
+                // Start WebSocket streaming session
+                ws.send(JSON.stringify({
+                    type: 'audio_stream_start',
+                    config: {
+                        sample_rate: 16000,
+                        channels: 1,
+                        format: 'pcm'
+                    }
+                }));
+
+                logDebug('Started streaming session');
+                setStatus('Streaming STT Active', 'info');
+
+                // Get microphone access
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        sampleRate: 16000,
+                        channelCount: 1,
+                        echoCancellation: true,
+                        noiseSuppression: false,  // Disable for cleaner audio
+                        autoGainControl: false
+                    }
+                });
+
+                // Create AudioContext for raw audio processing
+                audioContext = new (window.AudioContext || window.webkitAudioContext)({
+                    sampleRate: 16000
+                });
+
+                const source = audioContext.createMediaStreamSource(stream);
+                
+                // Create ScriptProcessor for raw audio data
+                processor = audioContext.createScriptProcessor(1024, 1, 1);
+                
+                processor.onaudioprocess = (event) => {
+                    if (!streamingActive) return;
+                    const inputBuffer = event.inputBuffer;
+                    const audioData = inputBuffer.getChannelData(0);
+                    // Convert to 16-bit PCM (raw, no container for streaming)
+                    const pcmData = new Int16Array(audioData.length);
+                    for (let i = 0; i < audioData.length; i++) {
+                        const sample = Math.max(-32768, Math.min(32767, Math.round(audioData[i] * 32767)));
+                        pcmData[i] = sample;
+                    }
+                    // Send RAW PCM bytes (no WAV header for streaming)
+                    const rawPcmBytes = new Uint8Array(pcmData.buffer);
+                    const base64Audio = btoa(String.fromCharCode(...rawPcmBytes));
+                    ws.send(JSON.stringify({
+                        type: 'audio_chunk',
+                        audio_data: base64Audio,
+                        timestamp: Date.now(),
+                        format: 'raw_pcm',  // Changed from 'linear16' to be clear
+                        sample_rate: 16000,
+                        channels: 1,
+                        samples: pcmData.length,
+                        bytes: rawPcmBytes.length
+                    }));
+                    logDebug(`Sent raw PCM: ${pcmData.length} samples (${rawPcmBytes.length} bytes)`);
+                };
+
+                // Connect audio processing chain
+                source.connect(processor);
+                processor.connect(audioContext.destination);
+
+                streamingActive = true;
+
+                // Update UI
+                document.getElementById('test-streaming-btn').textContent = '⏹ Stop Streaming';
+                document.getElementById('test-streaming-btn').style.background = '#ffe8e8';
+
+                // Auto-stop after 10 seconds for testing
+                setTimeout(() => {
+                    if (streamingActive) {
+                        stopStreamingTest();
+                    }
+                }, 10000);
+
+                // Store stream reference for cleanup
+                streamingSession.stream = stream;
+
+            } catch (error) {
+                setError(`Streaming failed: ${error.message}`);
+                logDebug(`Streaming error: ${error}`);
+                streamingActive = false;
+            }
+        }
+
+        function stopStreamingTest() {
+            if (!streamingActive) return;
+
+            streamingActive = false;
+            
+            // Cleanup audio processing
+            if (processor) {
+                processor.disconnect();
+                processor = null;
+            }
+            
+            if (audioContext) {
+                audioContext.close();
+                audioContext = null;
+            }
+            
+            if (streamingSession && streamingSession.stream) {
+                streamingSession.stream.getTracks().forEach(track => track.stop());
+            }
+
+            // End streaming session
+            ws.send(JSON.stringify({
+                type: 'audio_stream_end'
+            }));
+
+            // Update UI
+            document.getElementById('test-streaming-btn').textContent = '🧪 Test Streaming STT';
+            document.getElementById('test-streaming-btn').style.background = '#e8f5e8';
+            
+            setStatus('Streaming Complete', 'ok');
+            logDebug('Streaming session ended');
+        }
+
+        document.getElementById('test-streaming-btn').onclick = startStreamingTest;
     </script>
 </body>
 </html>

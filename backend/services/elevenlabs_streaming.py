@@ -30,6 +30,8 @@ class ElevenLabsStreamingService:
                 output_format=output_format,
                 text=text,
                 model_id=model_id,
+                optimize_streaming_latency=4,  # max latency optimisations per ElevenLabs docs
+                request_options={"chunk_size": 512},  # smaller chunks for quicker first byte
                 voice_settings=VoiceSettings(
                     stability=0.0,
                     similarity_boost=1.0,

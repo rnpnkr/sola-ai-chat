@@ -14,9 +14,10 @@ logger = logging.getLogger(__name__)
 # Import your existing services
 from services.deepgram_service import DeepgramService
 from services.ai_service import OpenRouterService
-from tts_service import ElevenLabsService
+from services.elevenlabs_streaming import ElevenLabsStreamingService
 from agents.langgraph_orchestrator import langgraph_pipeline
 from agents.personality_agent import PersonalityAgent, neo_config
+from services.deepgram_streaming_service import DeepgramStreamingService
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -71,9 +72,190 @@ class VoiceAssistantWebSocket:
     def __init__(self):
         self.stt_service = DeepgramService()
         self.ai_service = OpenRouterService()
-        self.tts_service = ElevenLabsService()
+        self.tts_service = ElevenLabsStreamingService()
         self.langgraph_pipeline = langgraph_pipeline
         self.personality_agent = PersonalityAgent(neo_config)
+        # Streaming state per client
+        self.streaming_services = {}
+        self.audio_buffers = {}
+        self.streaming_vad_events = {}
+
+    def convert_webm_to_pcm(self, webm_data: bytes) -> bytes:
+        """
+        Convert WebM audio data to PCM format for Deepgram.
+        This is a simplified conversion - in production, use ffmpeg or similar.
+        """
+        try:
+            # For now, return raw data and let Deepgram handle it
+            # In production, implement proper WebM -> PCM conversion
+            logger.debug(f"[AUDIO] Received WebM chunk of {len(webm_data)} bytes (no conversion applied)")
+            return webm_data
+        except Exception as e:
+            logger.error(f"Audio conversion error: {e}")
+            return webm_data
+
+    async def start_audio_streaming(self, client_id: str, config: dict):
+        """Initialize streaming STT service for client."""
+        try:
+            if client_id in self.streaming_services:
+                await self.complete_audio_streaming(client_id)  # Cleanup any previous session
+            service = DeepgramStreamingService()
+            # initialize backup transcript store
+            service._latest_good_transcript = ""
+            final_transcript_holder = {"value": ""}
+            speech_ended = asyncio.Event()
+            self.audio_buffers[client_id] = []
+            self.streaming_vad_events[client_id] = speech_ended
+            async def transcript_callback(result):
+                try:
+                    alternatives = result.channel.alternatives
+                    is_final = getattr(result, 'is_final', False)
+                    speech_final = getattr(result, 'speech_final', False)
+                    if alternatives and len(alternatives) > 0:
+                        token = alternatives[0].transcript
+                        logger.info(f"[{client_id}] Transcript event: is_final={is_final}, speech_final={speech_final}, token='{token}'")
+                        # CRITICAL FIX: Only update final transcript with non-empty content
+                        if token.strip():  # Prevent empty strings from overwriting good transcripts
+                            final_transcript_holder["value"] = token
+                            service._latest_good_transcript = token  # keep backup in service as well
+                            logger.info(f"[{client_id}] ✅ Final transcript updated: '{final_transcript_holder['value']}'")
+                            if (is_final or speech_final):
+                                speech_ended.set()
+                                logger.info(f"[{client_id}] ✅ Speech ended event set due to final transcript")
+                            await manager.send_message(client_id, {"type": "transcript_token", "token": token})
+                        else:
+                            logger.info(f"[{client_id}] ❌ IGNORING empty transcript, keeping: '{final_transcript_holder['value']}'")
+                            if (is_final or speech_final):
+                                speech_ended.set()
+                                logger.info(f"[{client_id}] ✅ Speech ended event set despite empty transcript")
+                except Exception as e:
+                    logger.error(f"[{client_id}] Transcript callback error: {e}")
+            async def vad_callback(event):
+                try:
+                    event_type = getattr(event, 'type', None) or getattr(event, '__class__', type(event)).__name__.lower()
+                    logger.info(f"[{client_id}] VAD event: {event_type}")
+                    if "speech" in str(event_type).lower() and "start" in str(event_type).lower():
+                        await manager.send_status(client_id, "speech_detected")
+                    elif "utterance" in str(event_type).lower() or "end" in str(event_type).lower():
+                        await manager.send_status(client_id, "speech_ended")
+                        speech_ended.set()
+                except Exception as e:
+                    logger.error(f"VAD callback error: {e}")
+            await service.start_streaming(transcript_callback, vad_callback)
+            self.streaming_services[client_id] = {
+                "service": service,
+                "speech_ended": speech_ended,
+                "final_transcript_holder": final_transcript_holder
+            }
+            await manager.send_status(client_id, "stream_started")
+            logger.info(f"[{client_id}] Streaming STT service started successfully")
+        except Exception as e:
+            logger.error(f"Failed to start streaming for {client_id}: {e}")
+            await manager.send_error(client_id, f"Streaming initialization failed: {str(e)}")
+
+    def validate_audio_data(self, audio_data: bytes) -> bool:
+        """Validate that audio data is properly formatted"""
+        try:
+            if len(audio_data) == 0:
+                logger.warning("Empty audio data")
+                return False
+            # Check for WAV header
+            if len(audio_data) >= 12 and audio_data[:4] == b'RIFF' and audio_data[8:12] == b'WAVE':
+                logger.debug(f"Valid WAV header detected, total size: {len(audio_data)} bytes")
+                return True
+            # Also accept raw PCM data (for linear16 encoding)
+            elif len(audio_data) >= 2:  # At least one 16-bit sample
+                logger.debug(f"Accepting raw PCM data: {len(audio_data)} bytes")
+                return True
+            else:
+                logger.warning(f"Invalid audio format, size: {len(audio_data)}")
+                return False
+        except Exception as e:
+            logger.error(f"Audio validation error: {e}")
+            return False
+
+    async def process_audio_chunk(self, client_id: str, audio_data: bytes):
+        """Forward audio chunk to streaming service."""
+        if client_id not in self.streaming_services:
+            logger.warning(f"No streaming service for client {client_id}")
+            return
+        # For streaming, extract raw PCM from WAV if present
+        if len(audio_data) > 44 and audio_data[:4] == b'RIFF':
+            # Extract raw PCM data (skip 44-byte WAV header)
+            raw_pcm = audio_data[44:]
+            logger.info(f"[{client_id}] Extracted {len(raw_pcm)} bytes raw PCM from WAV container")
+            audio_to_send = raw_pcm
+        else:
+            # Already raw PCM
+            audio_to_send = audio_data
+        service = self.streaming_services[client_id]["service"]
+        await service.send_audio_chunk(audio_to_send)
+        self.audio_buffers[client_id].append(audio_data)  # Store original for fallback
+
+    async def complete_audio_streaming(self, client_id: str):
+        """Complete streaming, trigger LangGraph pipeline, cleanup."""
+        if client_id not in self.streaming_services:
+            logger.warning(f"No streaming service for client {client_id} on complete.")
+            return
+        service = self.streaming_services[client_id]["service"]
+        speech_ended = self.streaming_services[client_id]["speech_ended"]
+        final_transcript_holder = self.streaming_services[client_id]["final_transcript_holder"]
+
+        # --- Phase 1: stop sending audio, but keep socket open ---
+        await service.stop_audio_only()
+
+        # Send STT processing status for frontend timing (after audio is done, before draining events)
+        await manager.send_status(client_id, "stt_processing")
+
+        # Wait for either VAD-based speech end OR user timeout of 0.4 s
+        try:
+            await asyncio.wait_for(speech_ended.wait(), timeout=0.4)
+        except asyncio.TimeoutError:
+            pass  # user may have clicked early; we'll rely on flush below
+
+        # --- Phase 2: drain pending Deepgram events for up to 0.6 s ---
+        drain_deadline = asyncio.get_event_loop().time() + 0.6
+        while asyncio.get_event_loop().time() < drain_deadline and not final_transcript_holder["value"]:
+            if hasattr(service, "_process_pending_events"):
+                await service._process_pending_events()
+            await asyncio.sleep(0.05)
+
+        # After grace period, explicitly process once more
+        if hasattr(service, "_process_pending_events"):
+            await service._process_pending_events()
+
+        # If we still don't have a transcript but service captured one, copy it
+        if (not final_transcript_holder["value"].strip()) and getattr(service, "_latest_good_transcript", "").strip():
+            final_transcript_holder["value"] = service._latest_good_transcript
+            logger.info(f"[{client_id}] 🌟 Adopted service._latest_good_transcript before closing: '{final_transcript_holder['value']}'")
+
+        # --- Phase 3: close WebSocket ---
+        await service.finish_connection()
+
+        # --- Phase 4: final drain for late events ---
+        final_deadline = asyncio.get_event_loop().time() + 0.4
+        while asyncio.get_event_loop().time() < final_deadline and not final_transcript_holder["value"]:
+            if hasattr(service, "_process_pending_events"):
+                await service._process_pending_events()
+            await asyncio.sleep(0.05)
+
+        # CRITICAL FIX: Use the best available transcript
+        final_transcript = final_transcript_holder['value']
+        # Backup: Check if the service has accumulated transcript
+        if not final_transcript.strip():
+            final_transcript = service.get_accumulated_transcript()
+            logger.info(f"[{client_id}] 🔄 Using accumulated transcript from service: '{final_transcript}'")
+        logger.info(f"[{client_id}] Debug - final_transcript_holder: '{final_transcript_holder['value']}'")
+        logger.info(f"[{client_id}] Debug - service accumulated: '{service.get_accumulated_transcript()}'")
+        logger.info(f"[{client_id}] Final transcript at end of streaming: '{final_transcript}'")
+        logger.info(f"[{client_id}] Passing transcript to LangGraph: '{final_transcript}'")
+        # Run LangGraph pipeline with accumulated audio and, if available, transcript
+        audio_data = b"".join(self.audio_buffers[client_id])
+        await self.process_audio_with_langgraph(client_id, audio_data, final_transcript)
+        # Cleanup
+        del self.streaming_services[client_id]
+        del self.audio_buffers[client_id]
+        del self.streaming_vad_events[client_id]
 
     async def process_audio_stream(self, client_id: str, audio_data: bytes):
         """Process audio with real-time status updates"""
@@ -191,14 +373,15 @@ class VoiceAssistantWebSocket:
                 except Exception as e:
                     logger.warning(f"Failed to cleanup {output_path}: {e}")
 
-    async def process_audio_with_langgraph(self, client_id: str, audio_data: bytes):
+    async def process_audio_with_langgraph(self, client_id: str, audio_data: bytes, transcript: str = ""):
         """Process audio using LangGraph with DUAL streaming"""
         try:
+            logger.info(f"[{client_id}] process_audio_with_langgraph received transcript: '{transcript}'")
             # Send recording_complete status for total time measurement
             await manager.send_status(client_id, "recording_complete")
             initial_state = {
                 "audio_input": audio_data,
-                "transcript": "",
+                "transcript": transcript,
                 "ai_response": "",
                 "audio_output": b"",
                 "personality_type": "neo",
@@ -254,6 +437,19 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                 # Handle audio file upload
                 audio_data = base64.b64decode(message["audio_data"])
                 await assistant.process_audio_stream(client_id, audio_data)
+
+            elif message_type == "audio_stream_start":
+                # Initialize streaming STT service
+                await assistant.start_audio_streaming(client_id, message.get("config", {}))
+
+            elif message_type == "audio_chunk":
+                # Forward audio chunk to streaming service
+                audio_data = base64.b64decode(message["audio_data"])
+                await assistant.process_audio_chunk(client_id, audio_data)
+
+            elif message_type == "audio_stream_end":
+                # Complete streaming and trigger LangGraph pipeline
+                await assistant.complete_audio_streaming(client_id)
 
             elif message_type == "audio_stream":
                 # Handle real-time audio streaming (for future enhancement)

@@ -8,6 +8,9 @@ import time
 from services.deepgram_service import DeepgramService
 from services.ai_service import OpenRouterService
 import logging
+from services.deepgram_streaming_service import DeepgramStreamingService
+import uuid
+import wave, contextlib, io, struct
 
 logger = logging.getLogger(__name__)
 
@@ -27,37 +30,63 @@ elevenlabs_streaming_service = ElevenLabsStreamingService()
 
 async def stt_node(state: ConversationState, config=None):
     """
-    Use file-based Deepgram transcription via DeepgramService.
-    Adds file cleanup and enhanced error propagation via WebSocket.
+    TEMPORARY: Use file-based STT until streaming frontend is implemented
     """
-    temp_file = f"/tmp/audio_{state['client_id']}.wav"
+    # If transcript already exists (provided by streaming STT), skip file-based STT
+    transcript = state.get("transcript", "")
+    if transcript:
+        logger.info(f"[{state['client_id']}] Streaming transcript provided to stt_node: '{transcript}'. Skipping file-based STT.")
+        return {"transcript": transcript, "stt_time_ms": 0}
+    else:
+        logger.info(f"[{state['client_id']}] No streaming transcript found in stt_node. Running file-based STT.")
     manager = config.get("configurable", {}).get("manager") if config else None
     client_id = state["client_id"]
-    start_time = time.time()
+    audio_input = state["audio_input"]
+    # Use original file-based service
+    from services.deepgram_service import DeepgramService
+    file_stt_service = DeepgramService()
     try:
-        # Send stt_processing status for STT time measurement
         if manager:
             await manager.send_status(client_id, "stt_processing")
-        logger.info(f"[{client_id}] STT: Processing {len(state['audio_input'])} bytes")
-        with open(temp_file, 'wb') as f:
-            f.write(state["audio_input"])
-        stt_service = DeepgramService()
-        transcript = await asyncio.to_thread(stt_service.transcribe, temp_file)
+        # Create temp file for audio processing
+        import tempfile
+        import os
+        temp_dir = tempfile.gettempdir()
+        session_id = str(uuid.uuid4())
+        input_path = os.path.join(temp_dir, f"input_{session_id}.wav")
+        # Save audio data as a proper WAV file (16-bit PCM, 16 kHz, mono)
+        try:
+            with wave.open(input_path, 'wb') as wf:
+                wf.setnchannels(1)          # mono
+                wf.setsampwidth(2)          # 16-bit samples
+                wf.setframerate(16000)      # 16 kHz sample rate
+                wf.writeframes(audio_input)
+        except Exception as wav_err:
+            logger.error(f"[{client_id}] Failed to write WAV header: {wav_err}. Falling back to raw bytes.")
+            # Fallback: write raw bytes (may fail but at least not crash)
+            with open(input_path, 'wb') as f:
+                f.write(audio_input)
+        start_time = time.time()
+        # Use file-based transcription
+        transcript = await asyncio.to_thread(
+            file_stt_service.transcribe, input_path
+        )
         elapsed = time.time() - start_time
-        elapsed_ms = int(elapsed * 1000)
-        logger.info(f"[{client_id}] STT inference: {elapsed_ms} ms. Transcript: {transcript}")
-        return {"transcript": transcript, "stt_time_ms": elapsed_ms}
+        stt_time_ms = int(elapsed * 1000)
+        if manager:
+            await manager.send_status(client_id, "transcription_complete", {"transcript": transcript})
+        logger.info(f"[{client_id}] File-based STT complete: {stt_time_ms} ms. Transcript: {transcript}")
+        # Cleanup temp file
+        try:
+            os.remove(input_path)
+        except:
+            pass
+        return {"transcript": transcript or "", "stt_time_ms": stt_time_ms}
     except Exception as e:
         if manager:
             await manager.send_error(client_id, f"STT failed: {str(e)}")
-        logger.error(f"[{client_id}] STT: Error - {str(e)}")
+        logger.error(f"[{client_id}] STT Error: {str(e)}")
         return {"transcript": "", "stt_time_ms": 0}
-    finally:
-        if os.path.exists(temp_file):
-            try:
-                os.remove(temp_file)
-            except Exception:
-                pass
 
 async def llm_node(state: ConversationState, config=None):
     """
@@ -73,7 +102,6 @@ async def llm_node(state: ConversationState, config=None):
         ai_service = OpenRouterService()
         personality_agent = PersonalityAgent(neo_config)
         enhanced_prompt = f"{personality_agent.system_prompt}\n\nUser: {state['transcript']}"
-        logger.info(f"[{client_id}] LLM: Prompt: {enhanced_prompt}")
         response = ""
         start_time = time.time()
         token_count = 0
