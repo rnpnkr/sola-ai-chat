@@ -11,6 +11,9 @@ import logging
 from services.deepgram_streaming_service import DeepgramStreamingService
 import uuid
 import wave, contextlib, io, struct
+from memory.mem0_async_service import IntimateMemoryService
+from memory.memory_context_builder import MemoryContextBuilder
+from memory.conversation_memory_manager import ConversationMemoryManager
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +28,10 @@ class ConversationState(TypedDict):
 
 # --- Service instantiation ---
 elevenlabs_streaming_service = ElevenLabsStreamingService()
+
+# Initialize memory services
+mem0_service = IntimateMemoryService()
+memory_context_builder = MemoryContextBuilder(mem0_service)
 
 # --- Node implementations ---
 
@@ -97,11 +104,19 @@ async def llm_node(state: ConversationState, config=None):
         from agents.personality_agent import PersonalityAgent, neo_config
         manager = config.get("configurable", {}).get("manager") if config else None
         client_id = state["client_id"]
+        user_id = state.get("user_id", client_id)
         if manager:
             await manager.send_status(client_id, "llm_streaming")
         ai_service = OpenRouterService()
         personality_agent = PersonalityAgent(neo_config)
-        enhanced_prompt = f"{personality_agent.system_prompt}\n\nUser: {state['transcript']}"
+        # NEW: Get memory-informed context
+        intimate_context = await memory_context_builder.build_intimate_context(
+            current_message=state["transcript"],
+            user_id=user_id
+        )
+        # NEW: Enhanced prompt with memory context
+        enhanced_prompt = f"""{personality_agent.system_prompt}
+\n{intimate_context}\n\nCurrent conversation: {state['transcript']}\n\nRespond with the warmth and understanding of someone who truly knows this person."""
         response = ""
         start_time = time.time()
         token_count = 0
@@ -152,7 +167,24 @@ async def tts_node(state: ConversationState, config=None):
     elapsed_ms = int(elapsed * 1000)
     logger.info(f"[{client_id}] TTS inference: {elapsed_ms} ms. Chunks: {len(audio_chunks)}. Final size: {sum(len(c) for c in audio_chunks)} bytes")
     audio_output = b"".join(audio_chunks)
-    return {"audio_output": audio_output, "tts_time_ms": elapsed_ms}
+
+    # NEW: Background memory storage (add before return)
+    user_id = state.get("user_id", client_id)
+    conversation_memory_manager = ConversationMemoryManager(mem0_service)
+    memory_task = asyncio.create_task(
+        conversation_memory_manager.store_intimate_conversation(
+            user_message=state["transcript"],
+            ai_response=state["ai_response"],
+            user_id=user_id,
+            emotional_context={"session_id": client_id}
+        )
+    )
+
+    return {
+        "audio_output": audio_output,
+        "tts_time_ms": elapsed_ms,
+        "memory_storage_task": memory_task
+    }
 
 # --- Build the graph ---
 graph_builder = StateGraph(ConversationState)

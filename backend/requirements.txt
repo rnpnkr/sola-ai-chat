@@ -10,3 +10,6 @@ langchain>=0.3.0
 langchain-openai>=0.2.0
 pydantic>=2.0.0
 deepgram-sdk
+mem0ai>=0.1.0
+asyncio>=3.4.0
+vecs>=0.4.0
