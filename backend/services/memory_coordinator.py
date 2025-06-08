@@ -5,6 +5,7 @@ from datetime import datetime
 from collections import defaultdict
 from memory.mem0_async_service import IntimateMemoryService
 from services.memory_context_enhancer import MemoryContextEnhancer
+from services.chat_service import chat_service
 
 logger = logging.getLogger(__name__)
 
@@ -318,6 +319,47 @@ class MemoryCoordinator:
                     # Could add to dead letter queue here
         except Exception as e:
             logger.error(f"Error in retry handler for {user_id}: {e}")
+    async def store_chat_and_memory(
+        self,
+        user_id: str,
+        session_id: str,
+        user_message: str,
+        ai_response: str,
+        metadata: Optional[Dict] = None
+    ) -> str:
+        """Store both chat and memory in parallel"""
+        # Store chat immediately (high priority)
+        chat_task = asyncio.create_task(
+            chat_service.store_chat(
+                user_id=user_id,
+                session_id=session_id,
+                user_message=user_message,
+                ai_response=ai_response,
+                metadata=metadata
+            )
+        )
+        
+        # Schedule memory operation (background)
+        memory_operation_id = await self.schedule_memory_operation(
+            user_id=user_id,
+            operation_type="conversation_memory",
+            content={
+                "messages": [
+                    {"role": "user", "content": user_message},
+                    {"role": "assistant", "content": ai_response}
+                ],
+                "metadata": {
+                    "session_id": session_id,
+                    "timestamp": datetime.now().isoformat(),
+                    **(metadata or {})
+                }
+            }
+        )
+        
+        # Wait for chat storage to complete
+        await chat_task
+        
+        return memory_operation_id
 
 # Global instance
 memory_coordinator = None

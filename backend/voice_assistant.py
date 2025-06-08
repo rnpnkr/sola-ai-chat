@@ -1,4 +1,4 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, Query, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, FileResponse, StreamingResponse
 import asyncio
@@ -11,6 +11,7 @@ from typing import Dict, Optional
 import logging
 import io
 from PIL import Image, ImageDraw
+from services.chat_service import chat_service
 logger = logging.getLogger(__name__)
 
 # Import your existing services
@@ -198,7 +199,7 @@ class VoiceAssistantWebSocket:
         await service.send_audio_chunk(audio_to_send)
         self.audio_buffers[client_id].append(audio_data)  # Store original for fallback
 
-    async def complete_audio_streaming(self, client_id: str):
+    async def complete_audio_streaming(self, client_id: str, user_id: str = None):
         """Complete streaming, trigger LangGraph pipeline, cleanup."""
         if client_id not in self.streaming_services:
             logger.warning(f"No streaming service for client {client_id} on complete.")
@@ -260,7 +261,7 @@ class VoiceAssistantWebSocket:
             logger.info(f"[{client_id}] 🚫 Duplicate/empty transcript, skipping LangGraph processing")
         else:
             self.last_processed_transcript[client_id] = final_transcript
-            await self.process_audio_with_langgraph(client_id, audio_data, final_transcript)
+        await self.process_audio_with_langgraph(client_id, audio_data, final_transcript, user_id=user_id)
         # Cleanup
         del self.streaming_services[client_id]
         del self.audio_buffers[client_id]
@@ -383,12 +384,10 @@ class VoiceAssistantWebSocket:
                     logger.warning(f"Failed to cleanup {output_path}: {e}")
 
     async def process_audio_with_langgraph(self, client_id: str, audio_data: bytes, transcript: str = "", user_id: str = None):
-        """Process audio using LangGraph with DUAL streaming"""
+        """Process audio using LangGraph with chat storage"""
         try:
             logger.info(f"[{client_id}] process_audio_with_langgraph received transcript: '{transcript}'")
-            # Send recording_complete status for total time measurement
             await manager.send_status(client_id, "recording_complete")
-            # Use provided user_id or fallback to client_id
             pipeline_user_id = user_id if user_id else client_id
             initial_state = {
                 "audio_input": audio_data,
@@ -399,25 +398,34 @@ class VoiceAssistantWebSocket:
                 "client_id": client_id,
                 "user_id": pipeline_user_id
             }
-            # Pass manager through config for WebSocket updates
             config = {
                 "configurable": {
                     "manager": manager,
                     "client_id": client_id
                 }
             }
-            # Stream mode "values" for node completion
+            final_transcript = ""
+            final_ai_response = ""
             async for chunk in self.langgraph_pipeline.astream(
                 initial_state,
                 stream_mode="values",
                 config=config
             ):
-                # Node completion updates
                 if chunk.get("transcript") and not chunk.get("ai_response"):
-                    await manager.send_status(client_id, "transcription_complete", {"transcript": chunk["transcript"]})
+                    final_transcript = chunk["transcript"]
+                    await manager.send_status(client_id, "transcription_complete", {"transcript": final_transcript})
                 elif chunk.get("ai_response") and not chunk.get("audio_output"):
-                    await manager.send_status(client_id, "response_generated", {"ai_response": chunk["ai_response"]})
+                    final_ai_response = chunk["ai_response"]
+                    await manager.send_status(client_id, "response_generated", {"ai_response": final_ai_response})
                 elif chunk.get("audio_output"):
+                    # Store chat when conversation is complete
+                    if final_transcript and final_ai_response:
+                        await self._store_conversation_chat(
+                            user_id=pipeline_user_id,
+                            client_id=client_id,
+                            user_message=final_transcript,
+                            ai_response=final_ai_response
+                        )
                     await manager.send_result(client_id, {
                         "transcript": chunk["transcript"],
                         "ai_response": chunk["ai_response"],
@@ -429,13 +437,45 @@ class VoiceAssistantWebSocket:
             logger.error(f"LangGraph processing error: {e}")
             await manager.send_error(client_id, f"LangGraph failed: {str(e)}")
 
+    async def _store_conversation_chat(self, user_id: str, client_id: str, user_message: str, ai_response: str):
+        """Store conversation in chat storage"""
+        try:
+            coordinator = get_memory_coordinator()
+            await coordinator.store_chat_and_memory(
+                user_id=user_id,
+                session_id=client_id,  # Use client_id as session_id
+                user_message=user_message,
+                ai_response=ai_response,
+                metadata={
+                    "client_id": client_id,
+                    "conversation_type": "voice_chat"
+                }
+            )
+            logger.info(f"Stored chat for user {user_id}")
+        except Exception as e:
+            logger.error(f"Failed to store chat: {e}")
+
 
 assistant = VoiceAssistantWebSocket()
 
 
 @app.websocket("/ws/{client_id}")
-async def websocket_endpoint(websocket: WebSocket, client_id: str):
+async def websocket_endpoint(websocket: WebSocket, client_id: str, token: Optional[str] = Query(None)):
     await manager.connect(websocket, client_id)
+
+    # Authenticate user if token provided
+    user_id = client_id  # Default fallback
+    if token:
+        try:
+            from services.auth_service import auth_service
+            user_data = await auth_service.verify_token(token)
+            if user_data:
+                user_id = user_data["user_id"]
+                logger.info(f"Authenticated user {user_id} for client {client_id}")
+            else:
+                logger.warning(f"Invalid token for client {client_id}, using client_id as user_id")
+        except Exception as e:
+            logger.error(f"Auth error for client {client_id}: {e}")
 
     try:
         while True:
@@ -461,7 +501,7 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
 
             elif message_type == "audio_stream_end":
                 # Complete streaming and trigger LangGraph pipeline
-                await assistant.complete_audio_streaming(client_id)
+                await assistant.complete_audio_streaming(client_id, user_id)
 
             elif message_type == "audio_stream":
                 # Handle real-time audio streaming (for future enhancement)
@@ -477,7 +517,7 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
 
             elif message_type == "langgraph_stream":
                 audio_data = base64.b64decode(message["audio_data"])
-                await assistant.process_audio_with_langgraph(client_id, audio_data)
+                await assistant.process_audio_with_langgraph(client_id, audio_data, user_id=user_id)
 
             elif message_type == "ping":
                 # Handle ping/keepalive
@@ -528,6 +568,10 @@ async def get_graph_png():
             return StreamingResponse(buf, media_type="image/png")
         except Exception:
             return StreamingResponse(io.BytesIO(b""), media_type="image/png")
+
+@app.get("/chat")
+async def get_chat_page():
+    return FileResponse("chat.html")
 
 def handle_client_disconnect(client_id: str):
     """Clean up when client disconnects"""
@@ -596,6 +640,78 @@ async def get_cache_freshness(user_id: str):
             "error": str(e),
             "message": "Failed to get cache freshness"
         }
+
+# --- Authentication endpoints ---
+@app.post("/auth/signup")
+async def signup(request: dict):
+    """User registration"""
+    try:
+        from services.auth_service import auth_service
+        email = request.get("email")
+        password = request.get("password")
+        if not email or not password:
+            raise HTTPException(status_code=400, detail="Email and password required")
+        result = await auth_service.sign_up(email, password)
+        return {"message": "User created successfully", "data": result}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/auth/signin")
+async def signin(request: dict):
+    """User login"""
+    try:
+        from services.auth_service import auth_service
+        email = request.get("email")
+        password = request.get("password")
+        if not email or not password:
+            raise HTTPException(status_code=400, detail="Email and password required")
+        result = await auth_service.sign_in(email, password)
+        return {"message": "Login successful", "data": result}
+    except Exception as e:
+        raise HTTPException(status_code=401, detail=str(e))
+
+# --- Chat history endpoints ---
+async def get_user_id_from_token(token: str = Query(...)) -> str:
+    """Extract user_id from token"""
+    from services.auth_service import auth_service
+    user_data = await auth_service.verify_token(token)
+    if user_data and user_data.get("user_id"):
+        return user_data["user_id"]
+    raise HTTPException(status_code=401, detail="Invalid token")
+
+@app.get("/chats")
+async def get_user_chats(
+    limit: int = 50,
+    offset: int = 0,
+    token: str = Query(...)
+):
+    user_id = await get_user_id_from_token(token)
+    try:
+        chats = await chat_service.get_user_chats(user_id, limit, offset)
+        return {"chats": chats}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/chat-sessions")
+async def get_chat_sessions(token: str = Query(...)):
+    user_id = await get_user_id_from_token(token)
+    try:
+        sessions = await chat_service.get_chat_sessions(user_id)
+        return {"sessions": sessions}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/chats/{session_id}")
+async def get_session_chats(
+    session_id: str,
+    token: str = Query(...)
+):
+    user_id = await get_user_id_from_token(token)
+    try:
+        chats = await chat_service.get_session_chats(user_id, session_id)
+        return {"chats": chats}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn

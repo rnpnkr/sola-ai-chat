@@ -51,3 +51,9 @@ MEMORY_ENHANCEMENT_CONFIG = {
     "enabled": os.getenv("MEMORY_ENHANCEMENT_ENABLED", "true").lower() == "true"
 }
 
+SUPABASE_CONFIG = {
+    "url": os.getenv("SUPABASE_URL", ""),
+    "anon_key": os.getenv("SUPABASE_ANON_KEY", ""),
+    "service_role_key": os.getenv("SUPABASE_SERVICE_ROLE_KEY", ""),
+    "project_id": os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+}
