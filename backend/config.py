@@ -1,4 +1,3 @@
-
 """
 Configuration file for Voice Assistant
 Loads all settings from .env file
@@ -42,5 +41,13 @@ OPENROUTER_CONFIG = {
                                 "You are a helpful assistant. Keep responses concise and conversational."),
     "site_url": os.getenv("OPENROUTER_SITE_URL", "http://localhost:3000"),
     "site_name": os.getenv("OPENROUTER_SITE_NAME", "Voice Assistant")
+}
+
+# Memory Enhancement Configuration
+MEMORY_ENHANCEMENT_CONFIG = {
+    "model": os.getenv("OPENROUTER_MODEL_MEMORY_ENHANCER", "meta-llama/llama-3.1-8b-instruct:free"),
+    "max_tokens": 200,
+    "temperature": 0.3,
+    "enabled": os.getenv("MEMORY_ENHANCEMENT_ENABLED", "true").lower() == "true"
 }
 

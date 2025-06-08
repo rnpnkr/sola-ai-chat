@@ -5,9 +5,15 @@ from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import threading
+from fastapi.responses import StreamingResponse
+import io
+from services.background_service_manager import background_service_manager
+import signal
 
 # Import the function to create ElevenLabs components and the Conversation class
-from elevenlabs_service import create_conversation_components, ConversationStateManager, Conversation # Import Conversation
+from backend.conversational_api.elevenlabs_service import create_conversation_components, ConversationStateManager, Conversation # Import Conversation
+from memory.mem0_async_service import IntimateMemoryService
+from backend.subconscious.background_processor import PersistentSubconsciousProcessor
 
 app = FastAPI()
 
@@ -25,17 +31,32 @@ elevenlabs_client = None
 state_manager: ConversationStateManager = None
 conversation_instance = None
 conversation_started = False # Flag to track if conversation session is started
+mem0_service = None
+subconscious_processor = None
+
+# ADD: Import memory health monitor
+def _import_memory_health_monitor():
+    # Delayed import to avoid circular import issues
+    from services.memory_health_monitor import memory_health_monitor
+    return memory_health_monitor
 
 # Initialize components on startup
 @app.on_event("startup")
 async def startup_event():
-    global elevenlabs_client, state_manager, conversation_instance
+    global elevenlabs_client, state_manager, conversation_instance, mem0_service, subconscious_processor
     # Get the running asyncio event loop
     loop = asyncio.get_event_loop()
     elevenlabs_client, state_manager, conversation_instance = create_conversation_components(loop=loop)
+    # ADD: Initialize subconscious processing
+    mem0_service = IntimateMemoryService()
+    subconscious_processor = PersistentSubconsciousProcessor(mem0_service)
+    print("Subconscious processing system initialized")
     if not conversation_instance:
         print("Failed to initialize ElevenLabs conversation components.")
-        # Consider exiting or disabling features if initialization fails
+    # ADD: Initialize memory health monitoring
+    memory_health_monitor = _import_memory_health_monitor()
+    await memory_health_monitor.start_monitoring()
+    print("Memory health monitoring initialized")
 
 # Function to run the ElevenLabs conversation session in a separate thread
 def run_conversation_session(conv: Conversation):
@@ -103,6 +124,54 @@ async def websocket_endpoint(websocket: WebSocket):
 @app.get("/", tags=["Root"])
 async def read_root():
     return {"message": "Sola AI Chat Backend is running. Connect to /ws for conversation."}
+
+# Import the LangGraph pipeline for visualization
+def get_langgraph_png():
+    try:
+        from backend.agents.langgraph_orchestrator import langgraph_pipeline
+        graph = langgraph_pipeline.get_graph()
+        png_bytes = graph.draw_mermaid_png()
+        return png_bytes
+    except Exception as e:
+        # Return a simple PNG with error text if visualization fails
+        import PIL.Image, PIL.ImageDraw, PIL.ImageFont
+        img = PIL.Image.new('RGB', (600, 100), color=(255, 255, 255))
+        d = PIL.ImageDraw.Draw(img)
+        d.text((10, 40), f"Graph viz error: {str(e)}", fill=(255, 0, 0))
+        buf = io.BytesIO()
+        img.save(buf, format='PNG')
+        buf.seek(0)
+        return buf.read()
+
+@app.get("/graph", tags=["Graph"])
+async def get_graph_png():
+    """
+    Returns a PNG image of the current LangGraph pipeline for visualization.
+    """
+    png_bytes = get_langgraph_png()
+    return StreamingResponse(io.BytesIO(png_bytes), media_type="image/png")
+
+async def shutdown_handler():
+    """Gracefully shutdown background services"""
+    print("Shutting down background services...")
+    await background_service_manager.shutdown_all()
+
+def setup_signal_handlers():
+    """Setup signal handlers for graceful shutdown"""
+    def signal_handler(signum, frame):
+        print(f"Received signal {signum}, initiating shutdown...")
+        asyncio.create_task(shutdown_handler())
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+
+setup_signal_handlers()
+
+# ADD: New /health/memory endpoint
+@app.get("/health/memory", tags=["Health"])
+async def get_memory_health():
+    """Get memory system health status"""
+    memory_health_monitor = _import_memory_health_monitor()
+    return await memory_health_monitor.get_health_report()
 
 # To run this file with uvicorn:
 # uvicorn main:app --reload 

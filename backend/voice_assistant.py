@@ -1,6 +1,6 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.responses import HTMLResponse, FileResponse, StreamingResponse
 import asyncio
 import json
 import base64
@@ -9,6 +9,8 @@ import tempfile
 import os
 from typing import Dict, Optional
 import logging
+import io
+from PIL import Image, ImageDraw
 logger = logging.getLogger(__name__)
 
 # Import your existing services
@@ -18,6 +20,9 @@ from services.elevenlabs_streaming import ElevenLabsStreamingService
 from agents.langgraph_orchestrator import langgraph_pipeline
 from agents.personality_agent import PersonalityAgent, neo_config
 from services.deepgram_streaming_service import DeepgramStreamingService
+from services.background_service_manager import background_service_manager
+from subconscious.intimacy_scaffold import intimacy_scaffold_manager
+from services.memory_coordinator import get_memory_coordinator
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -79,6 +84,7 @@ class VoiceAssistantWebSocket:
         self.streaming_services = {}
         self.audio_buffers = {}
         self.streaming_vad_events = {}
+        self.last_processed_transcript = {}
 
     def convert_webm_to_pcm(self, webm_data: bytes) -> bytes:
         """
@@ -241,7 +247,6 @@ class VoiceAssistantWebSocket:
 
         # CRITICAL FIX: Use the best available transcript
         final_transcript = final_transcript_holder['value']
-        # Backup: Check if the service has accumulated transcript
         if not final_transcript.strip():
             final_transcript = service.get_accumulated_transcript()
             logger.info(f"[{client_id}] 🔄 Using accumulated transcript from service: '{final_transcript}'")
@@ -249,9 +254,13 @@ class VoiceAssistantWebSocket:
         logger.info(f"[{client_id}] Debug - service accumulated: '{service.get_accumulated_transcript()}'")
         logger.info(f"[{client_id}] Final transcript at end of streaming: '{final_transcript}'")
         logger.info(f"[{client_id}] Passing transcript to LangGraph: '{final_transcript}'")
-        # Run LangGraph pipeline with accumulated audio and, if available, transcript
         audio_data = b"".join(self.audio_buffers[client_id])
-        await self.process_audio_with_langgraph(client_id, audio_data, final_transcript)
+        # PATCH: Only process if transcript is non-empty and not a duplicate
+        if final_transcript.strip() == "" or final_transcript == self.last_processed_transcript.get(client_id):
+            logger.info(f"[{client_id}] 🚫 Duplicate/empty transcript, skipping LangGraph processing")
+        else:
+            self.last_processed_transcript[client_id] = final_transcript
+            await self.process_audio_with_langgraph(client_id, audio_data, final_transcript)
         # Cleanup
         del self.streaming_services[client_id]
         del self.audio_buffers[client_id]
@@ -373,19 +382,22 @@ class VoiceAssistantWebSocket:
                 except Exception as e:
                     logger.warning(f"Failed to cleanup {output_path}: {e}")
 
-    async def process_audio_with_langgraph(self, client_id: str, audio_data: bytes, transcript: str = ""):
+    async def process_audio_with_langgraph(self, client_id: str, audio_data: bytes, transcript: str = "", user_id: str = None):
         """Process audio using LangGraph with DUAL streaming"""
         try:
             logger.info(f"[{client_id}] process_audio_with_langgraph received transcript: '{transcript}'")
             # Send recording_complete status for total time measurement
             await manager.send_status(client_id, "recording_complete")
+            # Use provided user_id or fallback to client_id
+            pipeline_user_id = user_id if user_id else client_id
             initial_state = {
                 "audio_input": audio_data,
                 "transcript": transcript,
                 "ai_response": "",
                 "audio_output": b"",
                 "personality_type": "neo",
-                "client_id": client_id
+                "client_id": client_id,
+                "user_id": pipeline_user_id
             }
             # Pass manager through config for WebSocket updates
             config = {
@@ -475,11 +487,11 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                 await manager.send_error(client_id, f"Unknown message type: {message_type}")
 
     except WebSocketDisconnect:
-        manager.disconnect(client_id)
+        handle_client_disconnect(client_id)
     except Exception as e:
         logger.error(f"WebSocket error for client {client_id}: {e}")
         await manager.send_error(client_id, f"Connection error: {str(e)}")
-        manager.disconnect(client_id)
+        handle_client_disconnect(client_id)
 
 
 @app.get("/health")
@@ -495,6 +507,95 @@ async def get_homepage():
     # Serve the new index.html instead of HTML string
     return FileResponse("index.html")
 
+@app.get("/graph")
+async def get_graph_png():
+    """
+    Returns a PNG image of the current LangGraph pipeline for visualization.
+    """
+    try:
+        graph = langgraph_pipeline.get_graph()
+        png_bytes = graph.draw_mermaid_png()
+        return StreamingResponse(io.BytesIO(png_bytes), media_type="image/png")
+    except Exception as e:
+        # Return a simple PNG with error text if visualization fails
+        try:
+            img = Image.new('RGB', (600, 100), color=(255, 255, 255))
+            d = ImageDraw.Draw(img)
+            d.text((10, 40), f"Graph viz error: {str(e)}", fill=(255, 0, 0))
+            buf = io.BytesIO()
+            img.save(buf, format='PNG')
+            buf.seek(0)
+            return StreamingResponse(buf, media_type="image/png")
+        except Exception:
+            return StreamingResponse(io.BytesIO(b""), media_type="image/png")
+
+def handle_client_disconnect(client_id: str):
+    """Clean up when client disconnects"""
+    # Existing cleanup code...
+    manager.disconnect(client_id)
+    # NEW: Flush pending memory operations before disconnect
+    asyncio.create_task(_cleanup_user_memory_operations(client_id))
+    # Existing session completion storage
+    asyncio.create_task(_store_session_completion(client_id))
+    try:
+        background_service_manager.stop_user_processing(client_id)
+        logger.info(f"Stopped background processing for disconnected client {client_id}")
+    except Exception as e:
+        logger.error(f"Error stopping background processing for {client_id}: {e}")
+    assistant.last_processed_transcript.pop(client_id, None)
+
+async def _cleanup_user_memory_operations(client_id: str):
+    """Flush pending memory operations for disconnecting user"""
+    try:
+        coordinator = get_memory_coordinator()
+        await coordinator.flush_pending_operations(client_id)
+        logger.info(f"Flushed pending memory operations for {client_id}")
+    except Exception as e:
+        logger.error(f"Error flushing memory operations for {client_id}: {e}")
+
+async def _store_session_completion(client_id: str):
+    """Store session completion data"""
+    try:
+        await intimacy_scaffold_manager.store_session_complete(client_id)
+        logger.info(f"Session completion stored for {client_id}")
+    except Exception as e:
+        logger.error(f"Error storing session completion for {client_id}: {e}")
+
+@app.get("/memory-stats")
+async def get_memory_stats():
+    """Get memory coordinator statistics"""
+    try:
+        coordinator = get_memory_coordinator()
+        stats = coordinator.get_stats()
+        return {
+            "status": "healthy",
+            "memory_coordinator": stats,
+            "message": "Memory coordination statistics"
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": str(e),
+            "message": "Failed to get memory statistics"
+        }
+
+@app.get("/cache-freshness/{user_id}")
+async def get_cache_freshness(user_id: str):
+    """Get cache freshness information for debugging"""
+    try:
+        freshness_info = intimacy_scaffold_manager.get_cache_freshness_info(user_id)
+        return {
+            "status": "success",
+            "user_id": user_id,
+            "cache_info": freshness_info,
+            "message": "Cache freshness information"
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": str(e),
+            "message": "Failed to get cache freshness"
+        }
 
 if __name__ == "__main__":
     import uvicorn

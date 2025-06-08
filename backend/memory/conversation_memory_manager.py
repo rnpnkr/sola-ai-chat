@@ -15,14 +15,12 @@ class ConversationMemoryManager:
         ai_response: str,
         user_id: str,
         emotional_context: Dict = None
-    ) -> Optional[Dict]:
-        """Store conversation with intimate context and emotional metadata"""
-        
+    ) -> Optional[str]:
+        """Store conversation using coordinated memory operations"""
         conversation_messages = [
             {"role": "user", "content": user_message},
             {"role": "assistant", "content": ai_response}
         ]
-
         # Add emotional and contextual metadata
         metadata = {
             "timestamp": datetime.now().isoformat(),
@@ -30,17 +28,23 @@ class ConversationMemoryManager:
             "emotional_context": emotional_context or {},
             "intimacy_level": self._assess_intimacy_level(user_message, ai_response)
         }
-
         try:
-            result = await self.mem0_service.store_conversation_memory(
-                messages=conversation_messages,
+            # Use memory coordinator instead of direct storage
+            from services.memory_coordinator import get_memory_coordinator
+            coordinator = get_memory_coordinator()
+            operation_id = await coordinator.schedule_memory_operation(
                 user_id=user_id,
-                metadata=metadata
+                operation_type="conversation_memory",
+                content={
+                    "messages": conversation_messages,
+                    "metadata": metadata
+                },
+                priority=1  # High priority for conversation memory
             )
-            logger.info(f"Stored intimate memory for user {user_id}")
-            return result
+            logger.info(f"Scheduled intimate memory storage for user {user_id}: {operation_id}")
+            return operation_id
         except Exception as e:
-            logger.error(f"Failed to store memory: {e}")
+            logger.error(f"Failed to schedule memory storage: {e}")
             return None
 
     def _assess_intimacy_level(self, user_message: str, ai_response: str) -> str:

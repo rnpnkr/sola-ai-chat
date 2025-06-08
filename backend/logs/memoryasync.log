@@ -1,0 +1,266 @@
+(sola-voice-backend) aryan98@Aryans-MacBook-Pro backend % uvicorn voice_assistant:app --reload
+INFO:     Will watch for changes in these directories: ['/Users/aryan98/sola-ai-chat/backend']
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:     Started reloader process [32547] using StatReload
+INFO:     Started server process [32549]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+/Users/aryan98/sola-ai-chat/sola-voice-backend/lib/python3.11/site-packages/websockets/legacy/server.py:1178: DeprecationWarning: remove second argument of ws_handler
+  warnings.warn("remove second argument of ws_handler", DeprecationWarning)
+INFO:     127.0.0.1:64062 - "WebSocket /ws/28cbf6f9-5568-4c74-bdca-2613951dcacd" [accepted]
+INFO:voice_assistant:Client 28cbf6f9-5568-4c74-bdca-2613951dcacd connected
+INFO:     connection open
+INFO:     127.0.0.1:64070 - "GET / HTTP/1.1" 200 OK
+INFO:voice_assistant:Client 28cbf6f9-5568-4c74-bdca-2613951dcacd disconnected
+INFO:voice_assistant:Stopped background processing for disconnected client 28cbf6f9-5568-4c74-bdca-2613951dcacd
+INFO:voice_assistant:Flushed pending memory operations for 28cbf6f9-5568-4c74-bdca-2613951dcacd
+INFO:voice_assistant:Session completion stored for 28cbf6f9-5568-4c74-bdca-2613951dcacd
+INFO:     connection closed
+INFO:     127.0.0.1:64073 - "WebSocket /ws/28cbf6f9-5568-4c74-bdca-2613951dcacd" [accepted]
+INFO:voice_assistant:Client 28cbf6f9-5568-4c74-bdca-2613951dcacd connected
+INFO:     connection open
+INFO:services.deepgram_streaming_service:Deepgram connection attempt:
+INFO:services.deepgram_streaming_service:  API Key: e7ab95eac8...
+INFO:services.deepgram_streaming_service:  Options: {'alternatives': None, 'callback': None, 'callback_method': None, 'channels': 1, 'diarize': None, 'diarize_version': None, 'dictation': None, 'encoding': 'linear16', 'endpointing': 500, 'extra': None, 'filler_words': None, 'interim_results': True, 'keywords': None, 'keyterm': None, 'language': 'en-US', 'model': 'nova-2', 'multichannel': None, 'no_delay': None, 'numerals': None, 'punctuate': True, 'profanity_filter': None, 'redact': None, 'replace': None, 'sample_rate': 16000, 'search': None, 'smart_format': True, 'tag': None, 'tier': None, 'utterance_end_ms': '1000', 'vad_events': True, 'version': None}
+INFO:services.deepgram_streaming_service:Deepgram WebSocket opened.
+INFO:services.deepgram_streaming_service:Deepgram WebSocket connection started successfully.
+INFO:voice_assistant:[28cbf6f9-5568-4c74-bdca-2613951dcacd] Streaming STT service started successfully
+INFO:services.deepgram_streaming_service:VAD event received: SpeechStartedResponse
+INFO:services.deepgram_streaming_service:[DeepgramStreamingService] _process_pending_events: processing 1 VAD events
+INFO:voice_assistant:[28cbf6f9-5568-4c74-bdca-2613951dcacd] VAD event: SpeechStarted
+INFO:services.deepgram_streaming_service:[DeepgramStreamingService] TRANSCRIPT RESULT TYPE: <class 'deepgram.clients.listen.v1.websocket.response.LiveResultResponse'>
+INFO:services.deepgram_streaming_service:[DeepgramStreamingService] LIVE TRANSCRIPT: 'Hello.' (is_final=False, speech_final=False)
+INFO:services.deepgram_streaming_service:[DeepgramStreamingService] ✅ Updated latest good transcript: 'Hello.'
+INFO:services.deepgram_streaming_service:[DeepgramStreamingService] _process_pending_events: processing 1 transcripts
+INFO:voice_assistant:[28cbf6f9-5568-4c74-bdca-2613951dcacd] Transcript event: is_final=False, speech_final=False, token='Hello.'
+INFO:voice_assistant:[28cbf6f9-5568-4c74-bdca-2613951dcacd] ✅ Final transcript updated: 'Hello.'
+INFO:services.deepgram_streaming_service:[DeepgramStreamingService] TRANSCRIPT RESULT TYPE: <class 'deepgram.clients.listen.v1.websocket.response.LiveResultResponse'>
+INFO:services.deepgram_streaming_service:[DeepgramStreamingService] LIVE TRANSCRIPT: 'Hello.' (is_final=False, speech_final=False)
+INFO:services.deepgram_streaming_service:[DeepgramStreamingService] ✅ Updated latest good transcript: 'Hello.'
+INFO:services.deepgram_streaming_service:[DeepgramStreamingService] _process_pending_events: processing 1 transcripts
+INFO:voice_assistant:[28cbf6f9-5568-4c74-bdca-2613951dcacd] Transcript event: is_final=False, speech_final=False, token='Hello.'
+INFO:voice_assistant:[28cbf6f9-5568-4c74-bdca-2613951dcacd] ✅ Final transcript updated: 'Hello.'
+INFO:services.deepgram_streaming_service:[DeepgramStreamingService] TRANSCRIPT RESULT TYPE: <class 'deepgram.clients.listen.v1.websocket.response.LiveResultResponse'>
+INFO:services.deepgram_streaming_service:[DeepgramStreamingService] LIVE TRANSCRIPT: 'Hello. I'm feeling quite' (is_final=False, speech_final=False)
+INFO:services.deepgram_streaming_service:[DeepgramStreamingService] ✅ Updated latest good transcript: 'Hello. I'm feeling quite'
+INFO:services.deepgram_streaming_service:[DeepgramStreamingService] _process_pending_events: processing 1 transcripts
+INFO:voice_assistant:[28cbf6f9-5568-4c74-bdca-2613951dcacd] Transcript event: is_final=False, speech_final=False, token='Hello. I'm feeling quite'
+INFO:voice_assistant:[28cbf6f9-5568-4c74-bdca-2613951dcacd] ✅ Final transcript updated: 'Hello. I'm feeling quite'
+INFO:services.deepgram_streaming_service:[DeepgramStreamingService] TRANSCRIPT RESULT TYPE: <class 'deepgram.clients.listen.v1.websocket.response.LiveResultResponse'>
+INFO:services.deepgram_streaming_service:[DeepgramStreamingService] LIVE TRANSCRIPT: 'Hello. I'm feeling quite sad lately.' (is_final=False, speech_final=False)
+INFO:services.deepgram_streaming_service:[DeepgramStreamingService] ✅ Updated latest good transcript: 'Hello. I'm feeling quite sad lately.'
+INFO:services.deepgram_streaming_service:[DeepgramStreamingService] _process_pending_events: processing 1 transcripts
+INFO:voice_assistant:[28cbf6f9-5568-4c74-bdca-2613951dcacd] Transcript event: is_final=False, speech_final=False, token='Hello. I'm feeling quite sad lately.'
+INFO:voice_assistant:[28cbf6f9-5568-4c74-bdca-2613951dcacd] ✅ Final transcript updated: 'Hello. I'm feeling quite sad lately.'
+INFO:services.deepgram_streaming_service:[DeepgramStreamingService] TRANSCRIPT RESULT TYPE: <class 'deepgram.clients.listen.v1.websocket.response.LiveResultResponse'>
+INFO:services.deepgram_streaming_service:[DeepgramStreamingService] LIVE TRANSCRIPT: 'Hello. I'm feeling quite sad lately.' (is_final=False, speech_final=False)
+INFO:services.deepgram_streaming_service:[DeepgramStreamingService] ✅ Updated latest good transcript: 'Hello. I'm feeling quite sad lately.'
+INFO:services.deepgram_streaming_service:[DeepgramStreamingService] _process_pending_events: processing 1 transcripts
+INFO:voice_assistant:[28cbf6f9-5568-4c74-bdca-2613951dcacd] Transcript event: is_final=False, speech_final=False, token='Hello. I'm feeling quite sad lately.'
+INFO:voice_assistant:[28cbf6f9-5568-4c74-bdca-2613951dcacd] ✅ Final transcript updated: 'Hello. I'm feeling quite sad lately.'
+INFO:services.deepgram_streaming_service:VAD event received: SpeechStartedResponse
+INFO:services.deepgram_streaming_service:[DeepgramStreamingService] _process_pending_events: processing 1 VAD events
+INFO:voice_assistant:[28cbf6f9-5568-4c74-bdca-2613951dcacd] VAD event: SpeechStarted
+INFO:services.deepgram_streaming_service:[DeepgramStreamingService] TRANSCRIPT RESULT TYPE: <class 'deepgram.clients.listen.v1.websocket.response.LiveResultResponse'>
+INFO:services.deepgram_streaming_service:[DeepgramStreamingService] LIVE TRANSCRIPT: 'Hello. I'm feeling quite sad lately.' (is_final=True, speech_final=False)
+INFO:services.deepgram_streaming_service:[DeepgramStreamingService] ✅ Updated latest good transcript: 'Hello. I'm feeling quite sad lately.'
+INFO:services.deepgram_streaming_service:[DeepgramStreamingService] TRANSCRIPT RESULT TYPE: <class 'deepgram.clients.listen.v1.websocket.response.LiveResultResponse'>
+INFO:services.deepgram_streaming_service:[DeepgramStreamingService] LIVE TRANSCRIPT: 'Why am I feeling like' (is_final=False, speech_final=False)
+INFO:services.deepgram_streaming_service:[DeepgramStreamingService] ✅ Updated latest good transcript: 'Why am I feeling like'
+INFO:services.deepgram_streaming_service:[DeepgramStreamingService] _process_pending_events: processing 2 transcripts
+INFO:voice_assistant:[28cbf6f9-5568-4c74-bdca-2613951dcacd] Transcript event: is_final=True, speech_final=False, token='Hello. I'm feeling quite sad lately.'
+INFO:voice_assistant:[28cbf6f9-5568-4c74-bdca-2613951dcacd] ✅ Final transcript updated: 'Hello. I'm feeling quite sad lately.'
+INFO:voice_assistant:[28cbf6f9-5568-4c74-bdca-2613951dcacd] ✅ Speech ended event set due to final transcript
+INFO:voice_assistant:[28cbf6f9-5568-4c74-bdca-2613951dcacd] Transcript event: is_final=False, speech_final=False, token='Why am I feeling like'
+INFO:voice_assistant:[28cbf6f9-5568-4c74-bdca-2613951dcacd] ✅ Final transcript updated: 'Why am I feeling like'
+INFO:services.deepgram_streaming_service:[DeepgramStreamingService] TRANSCRIPT RESULT TYPE: <class 'deepgram.clients.listen.v1.websocket.response.LiveResultResponse'>
+INFO:services.deepgram_streaming_service:[DeepgramStreamingService] LIVE TRANSCRIPT: 'Why am I feeling like this?' (is_final=False, speech_final=False)
+INFO:services.deepgram_streaming_service:[DeepgramStreamingService] ✅ Updated latest good transcript: 'Why am I feeling like this?'
+INFO:services.deepgram_streaming_service:[DeepgramStreamingService] _process_pending_events: processing 1 transcripts
+INFO:voice_assistant:[28cbf6f9-5568-4c74-bdca-2613951dcacd] Transcript event: is_final=False, speech_final=False, token='Why am I feeling like this?'
+INFO:voice_assistant:[28cbf6f9-5568-4c74-bdca-2613951dcacd] ✅ Final transcript updated: 'Why am I feeling like this?'
+INFO:services.deepgram_streaming_service:[DeepgramStreamingService] TRANSCRIPT RESULT TYPE: <class 'deepgram.clients.listen.v1.websocket.response.LiveResultResponse'>
+INFO:services.deepgram_streaming_service:[DeepgramStreamingService] LIVE TRANSCRIPT: 'Why am I feeling like this?' (is_final=False, speech_final=False)
+INFO:services.deepgram_streaming_service:[DeepgramStreamingService] ✅ Updated latest good transcript: 'Why am I feeling like this?'
+INFO:services.deepgram_streaming_service:[DeepgramStreamingService] _process_pending_events: processing 1 transcripts
+INFO:voice_assistant:[28cbf6f9-5568-4c74-bdca-2613951dcacd] Transcript event: is_final=False, speech_final=False, token='Why am I feeling like this?'
+INFO:voice_assistant:[28cbf6f9-5568-4c74-bdca-2613951dcacd] ✅ Final transcript updated: 'Why am I feeling like this?'
+INFO:services.deepgram_streaming_service:Audio stream loop ended. Sent 105 chunks, 215040 total bytes
+INFO:services.deepgram_streaming_service:Deepgram WebSocket closed: {
+    "type": "Close"
+}
+INFO:services.deepgram_streaming_service:[DeepgramStreamingService] TRANSCRIPT RESULT TYPE: <class 'deepgram.clients.listen.v1.websocket.response.LiveResultResponse'>
+INFO:services.deepgram_streaming_service:[DeepgramStreamingService] LIVE TRANSCRIPT: 'Why am I feeling like this?' (is_final=False, speech_final=False)
+INFO:services.deepgram_streaming_service:[DeepgramStreamingService] ✅ Updated latest good transcript: 'Why am I feeling like this?'
+INFO:services.deepgram_streaming_service:[DeepgramStreamingService] TRANSCRIPT RESULT TYPE: <class 'deepgram.clients.listen.v1.websocket.response.LiveResultResponse'>
+INFO:services.deepgram_streaming_service:[DeepgramStreamingService] LIVE TRANSCRIPT: 'Why am I feeling like this?' (is_final=True, speech_final=True)
+INFO:services.deepgram_streaming_service:[DeepgramStreamingService] ✅ Updated latest good transcript: 'Why am I feeling like this?'
+INFO:services.deepgram_streaming_service:[DeepgramStreamingService] TRANSCRIPT RESULT TYPE: <class 'deepgram.clients.listen.v1.websocket.response.LiveResultResponse'>
+INFO:services.deepgram_streaming_service:[DeepgramStreamingService] LIVE TRANSCRIPT: '' (is_final=True, speech_final=True)
+INFO:services.deepgram_streaming_service:[DeepgramStreamingService] ❌ Ignoring empty transcript, keeping: 'Why am I feeling like this?'
+INFO:services.deepgram_streaming_service:VAD event received: UtteranceEndResponse
+/Users/aryan98/sola-ai-chat/sola-voice-backend/lib/python3.11/site-packages/websockets/exceptions.py:125: DeprecationWarning: ConnectionClosed.code is deprecated; use Protocol.close_code or ConnectionClosed.rcvd.code
+  warnings.warn(  # deprecated in 13.1 - 2024-09-21
+INFO:services.deepgram_streaming_service:Deepgram WebSocket closed: {
+    "type": "Close"
+}
+INFO:services.deepgram_streaming_service:Deepgram WebSocket connection closed.
+INFO:voice_assistant:[28cbf6f9-5568-4c74-bdca-2613951dcacd] Debug - final_transcript_holder: 'Why am I feeling like this?'
+INFO:voice_assistant:[28cbf6f9-5568-4c74-bdca-2613951dcacd] Debug - service accumulated: 'Why am I feeling like this?'
+INFO:voice_assistant:[28cbf6f9-5568-4c74-bdca-2613951dcacd] Final transcript at end of streaming: 'Why am I feeling like this?'
+INFO:voice_assistant:[28cbf6f9-5568-4c74-bdca-2613951dcacd] Passing transcript to LangGraph: 'Why am I feeling like this?'
+INFO:voice_assistant:[28cbf6f9-5568-4c74-bdca-2613951dcacd] process_audio_with_langgraph received transcript: 'Why am I feeling like this?'
+INFO:agents.langgraph_orchestrator:[28cbf6f9-5568-4c74-bdca-2613951dcacd] Streaming transcript provided to stt_node: 'Why am I feeling like this?'. Skipping file-based STT.
+INFO:services.deepgram_streaming_service:[DeepgramStreamingService] _process_pending_events: processing 3 transcripts
+INFO:voice_assistant:[28cbf6f9-5568-4c74-bdca-2613951dcacd] Transcript event: is_final=False, speech_final=False, token='Why am I feeling like this?'
+INFO:voice_assistant:[28cbf6f9-5568-4c74-bdca-2613951dcacd] ✅ Final transcript updated: 'Why am I feeling like this?'
+INFO:voice_assistant:[28cbf6f9-5568-4c74-bdca-2613951dcacd] Transcript event: is_final=True, speech_final=True, token='Why am I feeling like this?'
+INFO:voice_assistant:[28cbf6f9-5568-4c74-bdca-2613951dcacd] ✅ Final transcript updated: 'Why am I feeling like this?'
+INFO:voice_assistant:[28cbf6f9-5568-4c74-bdca-2613951dcacd] ✅ Speech ended event set due to final transcript
+INFO:voice_assistant:[28cbf6f9-5568-4c74-bdca-2613951dcacd] Transcript event: is_final=True, speech_final=True, token=''
+INFO:voice_assistant:[28cbf6f9-5568-4c74-bdca-2613951dcacd] ❌ IGNORING empty transcript, keeping: 'Why am I feeling like this?'
+INFO:voice_assistant:[28cbf6f9-5568-4c74-bdca-2613951dcacd] ✅ Speech ended event set despite empty transcript
+INFO:services.deepgram_streaming_service:[DeepgramStreamingService] _process_pending_events: processing 1 VAD events
+INFO:voice_assistant:[28cbf6f9-5568-4c74-bdca-2613951dcacd] VAD event: UtteranceEnd
+INFO:mem0.vector_stores.supabase:Creating new collection: mem0
+INFO:mem0.vector_stores.supabase:Successfully created collection mem0 with dimension 1536
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+🤖 Streaming from OpenRouter using openai/gpt-4.1-nano...
+INFO:httpx:HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:services.ai_service:[OpenRouter Streaming] Token: 
+INFO:services.ai_service:[OpenRouter Streaming] Token: It
+INFO:services.ai_service:[OpenRouter Streaming] Token: ’s
+INFO:services.ai_service:[OpenRouter Streaming] Token:  completely
+INFO:services.ai_service:[OpenRouter Streaming] Token:  understandable
+INFO:services.ai_service:[OpenRouter Streaming] Token:  to
+INFO:services.ai_service:[OpenRouter Streaming] Token:  feel
+INFO:services.ai_service:[OpenRouter Streaming] Token:  this
+INFO:services.ai_service:[OpenRouter Streaming] Token:  way
+INFO:services.ai_service:[OpenRouter Streaming] Token: ,
+INFO:services.ai_service:[OpenRouter Streaming] Token:  especially
+INFO:services.ai_service:[OpenRouter Streaming] Token:  with
+INFO:services.ai_service:[OpenRouter Streaming] Token:  everything
+INFO:services.ai_service:[OpenRouter Streaming] Token:  happening
+INFO:services.ai_service:[OpenRouter Streaming] Token:  around
+INFO:services.ai_service:[OpenRouter Streaming] Token:  you
+INFO:services.ai_service:[OpenRouter Streaming] Token:  and
+INFO:services.ai_service:[OpenRouter Streaming] Token:  with
+INFO:services.ai_service:[OpenRouter Streaming] Token:  your
+INFO:services.ai_service:[OpenRouter Streaming] Token:  girlfriend
+INFO:services.ai_service:[OpenRouter Streaming] Token: .
+INFO:services.ai_service:[OpenRouter Streaming] Token:  Sometimes
+INFO:services.ai_service:[OpenRouter Streaming] Token: ,
+INFO:services.ai_service:[OpenRouter Streaming] Token:  our
+INFO:services.ai_service:[OpenRouter Streaming] Token:  emotions
+INFO:services.ai_service:[OpenRouter Streaming] Token:  just
+INFO:services.ai_service:[OpenRouter Streaming] Token:  flow
+INFO:services.ai_service:[OpenRouter Streaming] Token:  through
+INFO:services.ai_service:[OpenRouter Streaming] Token:  us
+INFO:services.ai_service:[OpenRouter Streaming] Token: ,
+INFO:services.ai_service:[OpenRouter Streaming] Token:  even
+INFO:services.ai_service:[OpenRouter Streaming] Token:  if
+INFO:services.ai_service:[OpenRouter Streaming] Token:  we
+INFO:services.ai_service:[OpenRouter Streaming] Token: ’re
+INFO:services.ai_service:[OpenRouter Streaming] Token:  not
+INFO:services.ai_service:[OpenRouter Streaming] Token:  sure
+INFO:services.ai_service:[OpenRouter Streaming] Token:  exactly
+INFO:services.ai_service:[OpenRouter Streaming] Token:  why
+INFO:services.ai_service:[OpenRouter Streaming] Token: .
+INFO:services.ai_service:[OpenRouter Streaming] Token:  Would
+INFO:services.ai_service:[OpenRouter Streaming] Token:  you
+INFO:services.ai_service:[OpenRouter Streaming] Token:  like
+INFO:services.ai_service:[OpenRouter Streaming] Token:  to
+INFO:services.ai_service:[OpenRouter Streaming] Token:  take
+INFO:services.ai_service:[OpenRouter Streaming] Token:  a
+INFO:services.ai_service:[OpenRouter Streaming] Token:  moment
+INFO:services.ai_service:[OpenRouter Streaming] Token:  together
+INFO:services.ai_service:[OpenRouter Streaming] Token:  to
+INFO:services.ai_service:[OpenRouter Streaming] Token:  breathe
+INFO:services.ai_service:[OpenRouter Streaming] Token:  into
+INFO:services.ai_service:[OpenRouter Streaming] Token:  these
+INFO:services.ai_service:[OpenRouter Streaming] Token:  feelings
+INFO:services.ai_service:[OpenRouter Streaming] Token:  and
+INFO:services.ai_service:[OpenRouter Streaming] Token:  find
+INFO:services.ai_service:[OpenRouter Streaming] Token:  a
+INFO:services.ai_service:[OpenRouter Streaming] Token:  gentle
+INFO:services.ai_service:[OpenRouter Streaming] Token:  sense
+INFO:services.ai_service:[OpenRouter Streaming] Token:  of
+INFO:services.ai_service:[OpenRouter Streaming] Token:  grounding
+INFO:services.ai_service:[OpenRouter Streaming] Token: ?
+INFO:services.ai_service:[OpenRouter Streaming] Token: 
+INFO:services.ai_service:[OpenRouter Streaming] Token: 
+INFO:agents.langgraph_orchestrator:[28cbf6f9-5568-4c74-bdca-2613951dcacd] LLM inference: 1422 ms. Tokens: 62. Intimacy: 0.04
+INFO:agents.langgraph_orchestrator:Starting subconscious processing for 28cbf6f9-5568-4c74-bdca-2613951dcacd
+INFO:subconscious.intimacy_scaffold:Real-time scaffold update complete for 28cbf6f9-5568-4c74-bdca-2613951dcacd
+INFO:agents.langgraph_orchestrator:Completed subconscious processing for 28cbf6f9-5568-4c74-bdca-2613951dcacd
+INFO:memory.conversation_memory_manager:Scheduled intimate memory storage for user 28cbf6f9-5568-4c74-bdca-2613951dcacd: 28cbf6f9-5568-4c74-bdca-2613951dcacd_conversation_memory_1749387881.039743
+INFO:httpx:HTTP Request: POST https://api.elevenlabs.io/v1/text-to-speech/kdmDKE6EkgrWrrykO9Qt/stream?optimize_streaming_latency=4&output_format=mp3_22050_32 "HTTP/1.1 200 OK"
+INFO:agents.langgraph_orchestrator:[28cbf6f9-5568-4c74-bdca-2613951dcacd] TTS inference: 1253 ms. Chunks: 160. Final size: 81861 bytes
+INFO:services.background_service_manager:Started managed background processing for 28cbf6f9-5568-4c74-bdca-2613951dcacd
+INFO:agents.langgraph_orchestrator:Ensured long-term background processing for 28cbf6f9-5568-4c74-bdca-2613951dcacd
+INFO:subconscious.background_processor:Starting continuous relationship analysis for 28cbf6f9-5568-4c74-bdca-2613951dcacd
+INFO:subconscious.background_processor:Running psychological analysis cycle for 28cbf6f9-5568-4c74-bdca-2613951dcacd
+INFO:     127.0.0.1:64088 - "GET /favicon.ico HTTP/1.1" 404 Not Found
+INFO:services.memory_coordinator:Processing 2 batched memory operations for 28cbf6f9-5568-4c74-bdca-2613951dcacd
+INFO:httpx:HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:services.memory_context_enhancer:🔍 [DEBUG] Raw LLM response: {"enhanced_user_message":"Why am I feeling like this? [EMOTIONAL_STATE: confused, overwhelmed] [RELATIONSHIP_CONCERN: with girlfriend]","enhanced_ai_response":"It’s completely understandable to feel this way, especially with everything happening around you and with your girlfriend... Sometimes, our emotions just flow through us, even if we’re not sure exactly why... Would you like to take a moment together to breathe into these feelings and find a gentle sense of grounding? [SUPPORT_PROVIDED: emotional validation, grounding suggestion]","memory_facts":["User is experiencing emotional confusion related to feelings about their relationship.","User feels overwhelmed by external circumstances.","AI is providing emotional support and grounding techniques."],"emotional_tone":"distressed","conversation_significance":"high"}
+INFO:services.memory_context_enhancer:🔍 [DEBUG] Original user message: 'Why am I feeling like this?'
+INFO:services.memory_context_enhancer:🔍 [DEBUG] Original AI response: 'It’s completely understandable to feel this way, especially with everything happening around you and with your girlfriend... Sometimes, our emotions just flow through us, even if we’re not sure exactly why... Would you like to take a moment together to breathe into these feelings and find a gentle sense of grounding?'
+INFO:services.memory_context_enhancer:🔍 [DEBUG] Structured enhancement result: {'enhanced_user_message': 'Why am I feeling like this? [EMOTIONAL_STATE: confused, overwhelmed] [RELATIONSHIP_CONCERN: with girlfriend]', 'enhanced_ai_response': 'It’s completely understandable to feel this way, especially with everything happening around you and with your girlfriend... Sometimes, our emotions just flow through us, even if we’re not sure exactly why... Would you like to take a moment together to breathe into these feelings and find a gentle sense of grounding? [SUPPORT_PROVIDED: emotional validation, grounding suggestion]', 'memory_facts': ['User is experiencing emotional confusion related to feelings about their relationship.', 'User feels overwhelmed by external circumstances.', 'AI is providing emotional support and grounding techniques.'], 'emotional_tone': 'distressed', 'conversation_significance': 'high'}
+INFO:services.memory_coordinator:🔍 [DEBUG] Sending to Mem0 - Enhanced messages: [{'role': 'user', 'content': 'Why am I feeling like this? [EMOTIONAL_STATE: confused, overwhelmed] [RELATIONSHIP_CONCERN: with girlfriend]'}, {'role': 'assistant', 'content': 'It’s completely understandable to feel this way, especially with everything happening around you and with your girlfriend... Sometimes, our emotions just flow through us, even if we’re not sure exactly why... Would you like to take a moment together to breathe into these feelings and find a gentle sense of grounding? [SUPPORT_PROVIDED: emotional validation, grounding suggestion]'}, {'role': 'system', 'content': 'MEMORY_FACTS: User is experiencing emotional confusion related to feelings about their relationship.; User feels overwhelmed by external circumstances.; AI is providing emotional support and grounding techniques. | EMOTIONAL_TONE: distressed | SIGNIFICANCE: high'}]
+INFO:services.memory_coordinator:🔍 [DEBUG] Sending to Mem0 - Metadata: {'timestamp': '2025-06-08T18:34:41.039634', 'conversation_type': 'intimate_companion', 'emotional_context': {'session_id': '28cbf6f9-5568-4c74-bdca-2613951dcacd'}, 'intimacy_level': 'medium'}
+INFO:mem0.vector_stores.supabase:Creating new collection: mem0
+INFO:mem0.vector_stores.supabase:Successfully created collection mem0 with dimension 1536
+INFO:httpx:HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:mem0.vector_stores.supabase:Creating new collection: mem0
+INFO:mem0.vector_stores.supabase:Successfully created collection mem0 with dimension 1536
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+INFO:root:Total existing memories: 6
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+INFO:root:{'id': '0', 'text': "User's girlfriend is feeling anxious since the last couple of days", 'event': 'NONE'}
+INFO:root:NOOP for Memory (async).
+INFO:root:{'id': '1', 'text': 'Feeling sad today', 'event': 'NONE'}
+INFO:root:NOOP for Memory (async).
+INFO:root:{'id': '2', 'text': 'Emotional expression: Balanced', 'event': 'NONE'}
+INFO:root:NOOP for Memory (async).
+INFO:root:{'id': '3', 'text': 'Values emotional connection and sharing feelings', 'event': 'NONE'}
+INFO:root:NOOP for Memory (async).
+INFO:root:{'id': '4', 'text': 'Relationship status: Building initial trust', 'event': 'NONE'}
+INFO:root:NOOP for Memory (async).
+INFO:root:{'id': '5', 'text': 'Psychological analysis: avoidant attachment, surface vulnerability, stable growth', 'event': 'NONE'}
+INFO:root:NOOP for Memory (async).
+INFO:root:{'id': '6', 'text': 'User is feeling confused and overwhelmed', 'event': 'ADD'}
+INFO:root:{'id': '7', 'text': 'User has a relationship concern with girlfriend', 'event': 'ADD'}
+INFO:mem0.vector_stores.supabase:Inserting 1 vectors into collection mem0
+INFO:mem0.vector_stores.supabase:Inserting 1 vectors into collection mem0
+INFO:services.memory_coordinator:🔍 [DEBUG] Mem0 storage result: {'results': [{'id': 'b207de72-b4ec-4eb4-99a1-9444c7cc1e9c', 'memory': 'User is feeling confused and overwhelmed', 'event': 'ADD'}, {'id': '676aee92-1661-47e5-a236-2491800d2c42', 'memory': 'User has a relationship concern with girlfriend', 'event': 'ADD'}]}
+INFO:httpx:HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:mem0.memory.main:No new facts retrieved from input. Skipping memory update LLM call.
+INFO:services.memory_coordinator:Processed 1 batched scaffold updates for 28cbf6f9-5568-4c74-bdca-2613951dcacd
+INFO:subconscious.background_processor:Scheduled relationship evolution storage for 28cbf6f9-5568-4c74-bdca-2613951dcacd
+INFO:subconscious.background_processor:Psychological analysis cycle complete for 28cbf6f9-5568-4c74-bdca-2613951dcacd - 3 searches vs 8 previous
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+INFO:services.memory_coordinator:✅ Memory storage verified for operation 28cbf6f9-5568-4c74-bdca-2613951dcacd_conversation_memory_1749387881.039743
+INFO:services.memory_coordinator:Processing 1 batched memory operations for 28cbf6f9-5568-4c74-bdca-2613951dcacd
+INFO:httpx:HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+INFO:root:Total existing memories: 5
+INFO:httpx:HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:root:{'id': '0', 'text': 'Psychological analysis: avoidant attachment, surface vulnerability, stable growth', 'event': 'UPDATE', 'old_memory': 'Psychological analysis: avoidant attachment, surface vulnerability, stable growth'}
+INFO:root:{'id': '1', 'text': 'Relationship status: Building initial trust', 'event': 'NONE'}
+INFO:root:NOOP for Memory (async).
+INFO:root:{'id': '2', 'text': 'User has a relationship concern with girlfriend', 'event': 'NONE'}
+INFO:root:NOOP for Memory (async).
+INFO:root:{'id': '3', 'text': 'Emotional expression: Balanced', 'event': 'NONE'}
+INFO:root:NOOP for Memory (async).
+INFO:root:{'id': '4', 'text': 'Values emotional connection and sharing feelings', 'event': 'NONE'}
+INFO:root:NOOP for Memory (async).
+INFO:mem0.memory.main:Updating memory with data='Psychological analysis: avoidant attachment, surface vulnerability, stable growth'
+INFO:httpx:HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"
+INFO:mem0.memory.main:Updating memory with ID memory_id='0cd88a35-e6a5-4722-95ba-4ecc7f1b6985' with data='Psychological analysis: avoidant attachment, surface vulnerability, stable growth'

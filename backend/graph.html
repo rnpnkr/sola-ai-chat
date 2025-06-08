@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LangGraph Pipeline Visualization</title>
+    <style>
+        body { font-family: 'Segoe UI', Arial, sans-serif; background: #f7f9fa; margin: 0; padding: 0; }
+        .container { max-width: 700px; margin: 40px auto; background: #fff; border-radius: 12px; box-shadow: 0 2px 12px #0001; padding: 32px; }
+        h1 { text-align: center; color: #2a3b4c; }
+        .graph-img { display: block; margin: 32px auto 16px auto; max-width: 100%; border-radius: 8px; box-shadow: 0 1px 8px #0002; }
+        .loading { text-align: center; color: #1a3b7f; font-size: 1.1rem; margin: 24px 0; }
+        .error { color: #b00; text-align: center; font-weight: bold; margin: 24px 0; }
+        .back-link { display: block; text-align: center; margin: 24px 0 0 0; font-size: 1.05rem; color: #1a3b7f; text-decoration: underline; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>LangGraph Pipeline Visualization</h1>
+        <div id="loading" class="loading">Loading graph...</div>
+        <img id="graph-img" class="graph-img" src="" alt="LangGraph Pipeline Graph" style="display:none;"/>
+        <div id="error" class="error" style="display:none;"></div>
+        <a href="/index.html" class="back-link">← Back to Voice Assistant</a>
+    </div>
+    <script>
+        const img = document.getElementById('graph-img');
+        const loading = document.getElementById('loading');
+        const error = document.getElementById('error');
+        function loadGraph() {
+            loading.style.display = '';
+            error.style.display = 'none';
+            img.style.display = 'none';
+            // Add cache buster
+            const url = '/graph?_=' + Date.now();
+            fetch(url)
+                .then(res => {
+                    if (!res.ok) throw new Error('Failed to load graph image');
+                    return res.blob();
+                })
+                .then(blob => {
+                    img.src = URL.createObjectURL(blob);
+                    img.onload = () => {
+                        loading.style.display = 'none';
+                        img.style.display = '';
+                    };
+                })
+                .catch(e => {
+                    loading.style.display = 'none';
+                    error.textContent = 'Error: ' + e.message;
+                    error.style.display = '';
+                });
+        }
+        loadGraph();
+    </script>
+</body>
+</html> 
