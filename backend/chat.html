@@ -405,6 +405,61 @@
         };
 
         // --- WebSocket & Voice Logic ---
+        let audioContextStream = null;
+        let audioSourceStream = null;
+        let audioBufferQueue = [];
+        let audioPlaying = false;
+        let audioStreamEnded = false;
+
+        function playBufferedAudio() {
+            if (!audioContextStream) {
+                audioContextStream = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            if (audioBufferQueue.length === 0 || audioPlaying) return;
+            audioPlaying = true;
+            const chunk = audioBufferQueue.shift();
+            audioContextStream.decodeAudioData(chunk.buffer.slice(0), (audioBuffer) => {
+                const source = audioContextStream.createBufferSource();
+                source.buffer = audioBuffer;
+                source.connect(audioContextStream.destination);
+                source.onended = () => {
+                    audioPlaying = false;
+                    if (audioBufferQueue.length > 0) {
+                        playBufferedAudio();
+                    } else if (audioStreamEnded) {
+                        // Clean up
+                        audioContextStream.close();
+                        audioContextStream = null;
+                        audioStreamEnded = false;
+                    }
+                };
+                source.start(0);
+            }, (err) => {
+                console.error('Audio decode error:', err);
+                audioPlaying = false;
+            });
+        }
+
+        function handleAudioChunk(base64Chunk) {
+            // Convert base64 to Uint8Array
+            const binary = atob(base64Chunk);
+            const bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) {
+                bytes[i] = binary.charCodeAt(i);
+            }
+            audioBufferQueue.push(bytes);
+            playBufferedAudio();
+        }
+
+        function endAudioStream() {
+            audioStreamEnded = true;
+            if (!audioPlaying && audioContextStream) {
+                audioContextStream.close();
+                audioContextStream = null;
+                audioStreamEnded = false;
+            }
+        }
+
         function connectWS() {
             if (ws) ws.close();
             ws = new WebSocket(`ws://${window.location.host}/ws/${clientId}?token=${authToken}`);
@@ -431,6 +486,14 @@
                     } else if (msg.status === 'llm_streaming') {
                         voiceStatus.textContent = '🤖 AI thinking...';
                         voiceStatus.className = 'voice-status processing';
+                    } else if (msg.status === 'llm_tts_streaming') {
+                        voiceStatus.textContent = '🤖 AI streaming...';
+                        voiceStatus.className = 'voice-status processing';
+                    } else if (msg.status === 'streaming_complete') {
+                        console.log('🎵 Full streaming pipeline complete');
+                        voiceStatus.style.display = 'none';
+                        voiceStatus.className = 'voice-status success';
+                        endAudioStream();
                     }
                 }
                 else if (msg.type === 'token_stream') {
@@ -451,6 +514,10 @@
                         tempMsg.textContent = msg.content;
                     }
                 }
+                else if (msg.type === 'audio_chunk') {
+                    console.log('🔊 Audio chunk received:', msg.chunk_number, 'bytes:', msg.audio_data.length);
+                    handleAudioChunk(msg.audio_data);
+                }
                 else if (msg.type === 'result') {
                     console.log('🏁 Result received, cleaning up');
                     voiceStatus.style.display = 'none';
@@ -464,9 +531,11 @@
                         console.log('✅ No temp message to remove');
                     }
                     if (msg.audio_data) {
+                        // Play the final audio file if present (fallback)
                         const audio = new Audio('data:audio/mp3;base64,' + msg.audio_data);
                         audio.play();
                     }
+                    endAudioStream();
                     verifyMessageIntegrity();
                 }
                 else if (msg.type === 'error') {

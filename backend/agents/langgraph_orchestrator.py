@@ -18,6 +18,8 @@ from subconscious.intimacy_scaffold import IntimacyScaffoldManager
 from subconscious.anticipatory_engine import AnticippatoryIntimacyEngine
 from services.background_service_manager import background_service_manager
 from datetime import datetime
+from services.elevenlabs_websocket_service import ElevenLabsWebSocketService
+from services.streaming_text_buffer import StreamingTextBuffer
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +34,7 @@ class ConversationState(TypedDict):
     user_id: str
 
 # --- Service instantiation ---
-elevenlabs_streaming_service = ElevenLabsStreamingService()
+# elevenlabs_streaming_service = ElevenLabsStreamingService()
 
 # Initialize memory services
 mem0_service = IntimateMemoryService()
@@ -114,10 +116,10 @@ async def stt_node(state: ConversationState, config=None):
         logger.error(f"[{client_id}] STT Error: {str(e)}")
         return {"transcript": "", "stt_time_ms": 0}
 
-async def llm_node(state: ConversationState, config=None):
+async def llm_tts_streaming_node(state: ConversationState, config=None):
     """
-    OpenRouter LLM with personality, memory, and intimacy scaffold.
-    Enhanced with subconscious understanding for intimate responses.
+    Combined LLM + TTS streaming node for minimal latency
+    Streams LLM tokens directly to ElevenLabs WebSocket
     """
     try:
         from agents.personality_agent import PersonalityAgent, neo_config
@@ -125,23 +127,23 @@ async def llm_node(state: ConversationState, config=None):
         client_id = state["client_id"]
         user_id = state.get("user_id", client_id)
         if manager:
-            await manager.send_status(client_id, "llm_streaming")
-        #ai_service = OpenRouterService()
-        ai_service = GroqService() 
+            await manager.send_status(client_id, "llm_tts_streaming")
+        # Initialize services
+        ai_service = GroqService()
         personality_agent = PersonalityAgent(neo_config)
-        # Existing: Get memory-informed context
+        elevenlabs_ws = ElevenLabsWebSocketService()
+        text_buffer = StreamingTextBuffer(min_chunk_size=15, max_chunk_size=100)
+        # Prepare context (same as before)
         intimate_context = await memory_context_builder.build_intimate_context(
             current_message=state["transcript"],
             user_id=user_id
         )
-        # NEW: Get intimacy scaffold for subconscious understanding
         intimacy_scaffold = await intimacy_scaffold_manager.get_intimacy_scaffold(user_id)
-        # NEW: Get anticipatory response guidance
         response_guidance = await anticipatory_engine.generate_response_guidance(
             user_id=user_id,
             current_message=state["transcript"]
         )
-        # NEW: Enhanced prompt with subconscious understanding
+        # Build prompt (same as before)
         subconscious_prompt = f"""{personality_agent.system_prompt}
 
 {intimate_context}
@@ -154,78 +156,79 @@ Current Emotional Mode: {intimacy_scaffold.emotional_availability_mode}
 Intimacy Score: {intimacy_scaffold.intimacy_score:.2f}
 Support Needs: {', '.join(intimacy_scaffold.support_needs) if intimacy_scaffold.support_needs else 'general presence'}
 
-UNRESOLVED THREADS:
-{chr(10).join(f'• {thread}' for thread in intimacy_scaffold.unresolved_threads) if intimacy_scaffold.unresolved_threads else '• No pending concerns'}
-
-RESPONSE GUIDANCE:
-Tone: {response_guidance.get('tone', 'warm_conversational')}
-Depth: {response_guidance.get('depth_level', 'friendly_supportive')}
-Approach: {response_guidance.get('emotional_approach', 'adaptive_mirroring')}
-
 Current conversation: {state['transcript']}
 
 Respond with the intuitive understanding of someone who truly knows this person's emotional landscape, current needs, and relationship dynamic."""
+        # Setup audio streaming
+        writer = get_stream_writer()
+        audio_chunks = []
+        chunk_count = 0
+        def audio_callback(chunk: bytes):
+            nonlocal chunk_count
+            chunk_count += 1
+            audio_chunks.append(chunk)
+            writer({"audio_chunk": chunk})
+            # Send to frontend
+            if manager:
+                import base64
+                asyncio.create_task(manager.send_message(client_id, {
+                    "type": "audio_chunk",
+                    "audio_data": base64.b64encode(chunk).decode('utf-8'),
+                    "chunk_number": chunk_count
+                }))
+        # Connect ElevenLabs WebSocket
+        await elevenlabs_ws.connect_streaming_session(audio_callback)
+        # Setup text streaming callback
+        async def stream_text_to_tts(text_chunk: str):
+            await elevenlabs_ws.stream_text_chunk(text_chunk)
+        text_buffer.set_text_callback(stream_text_to_tts)
+        # Stream LLM response and forward to TTS
         response = ""
         start_time = time.time()
         token_count = 0
         if hasattr(ai_service, 'get_streaming_response'):
-            response_chunks = []
             async for chunk in ai_service.get_streaming_response(subconscious_prompt):
-                response_chunks.append(chunk)
+                response += chunk
                 token_count += 1
+                # Send token to frontend
                 if manager:
                     await manager.send_message(client_id, {
                         "type": "token_stream",
                         "content": chunk
                     })
-            response = "".join(response_chunks)
+                # Buffer token for TTS streaming
+                await text_buffer.add_token(chunk)
         else:
-            response = await asyncio.to_thread(
-                ai_service.get_response,
-                subconscious_prompt
-            )
+            # Fallback for non-streaming AI services
+            response = await asyncio.to_thread(ai_service.get_response, subconscious_prompt)
             token_count = len(response.split())
+            # Send entire response to TTS
+            await elevenlabs_ws.stream_text_chunk(response)
+        # Finish streaming
+        await text_buffer.finish()
+        await elevenlabs_ws.finish_streaming()
         elapsed = time.time() - start_time
         elapsed_ms = int(elapsed * 1000)
-        logger.info(f"[{client_id}] LLM inference: {elapsed_ms} ms. Tokens: {token_count}. Intimacy: {intimacy_scaffold.intimacy_score:.2f}")
-        response = personality_agent.format_response(response)
-        return {"ai_response": response, "llm_time_ms": elapsed_ms}
+        logger.info(f"[{client_id}] Streaming complete: {elapsed_ms} ms. Tokens: {token_count}. Audio chunks: {chunk_count}")
+        # Background processing trigger
+        try:
+            started = await background_service_manager.ensure_user_background_processing(user_id)
+            if started:
+                logger.info(f"Ensured long-term background processing for {user_id}")
+        except Exception as e:
+            logger.error(f"Failed to ensure background processing for {user_id}: {e}")
+        # Send completion status
+        if manager:
+            await manager.send_status(client_id, "streaming_complete")
+        return {
+            "ai_response": response,
+            "audio_output": b"",  # Empty to avoid duplicate playback; chunks already streamed
+            "llm_time_ms": elapsed_ms,
+            "tts_time_ms": elapsed_ms
+        }
     except Exception as e:
-        logger.error(f"[{client_id}] Enhanced LLM: Error - {str(e)}")
-        return {"ai_response": "I'm here for you, let me gather my thoughts...", "llm_time_ms": 0}
-
-async def tts_node(state: ConversationState, config=None):
-    """
-    Text-to-speech node. Streams audio using ElevenLabsStreamingService.
-    Background processing is now handled by parallel subconscious_node.
-    """
-    manager = config.get("configurable", {}).get("manager") if config else None
-    client_id = state["client_id"]
-    user_id = state.get("user_id", client_id)
-    if manager:
-        await manager.send_status(client_id, "tts_generating")
-    writer = get_stream_writer()
-    audio_chunks = []
-    start_time = time.time()
-    def collect_chunk(chunk: bytes):
-        audio_chunks.append(chunk)
-        writer({"audio_chunk": chunk})
-    await elevenlabs_streaming_service.stream_tts(state["ai_response"], collect_chunk)
-    elapsed = time.time() - start_time
-    elapsed_ms = int(elapsed * 1000)
-    logger.info(f"[{client_id}] TTS inference: {elapsed_ms} ms. Chunks: {len(audio_chunks)}. Final size: {sum(len(c) for c in audio_chunks)} bytes")
-    audio_output = b"".join(audio_chunks)
-    # KEEP the long-term background processing trigger (3-minute cycles)
-    try:
-        started = await background_service_manager.ensure_user_background_processing(user_id)
-        if started:
-            logger.info(f"Ensured long-term background processing for {user_id}")
-    except Exception as e:
-        logger.error(f"Failed to ensure background processing for {user_id}: {e}")
-    return {
-        "audio_output": audio_output,
-        "tts_time_ms": elapsed_ms
-    }
+        logger.error(f"[{client_id}] Streaming error: {str(e)}")
+        return {"ai_response": "I'm here for you, let me gather my thoughts...", "audio_output": b""}
 
 async def subconscious_node(state: ConversationState, config=None):
     """
@@ -329,14 +332,13 @@ def _identify_immediate_support_needs(user_message: str) -> list:
 # --- Build the graph ---
 graph_builder = StateGraph(ConversationState)
 graph_builder.add_node("stt_node", stt_node)
-graph_builder.add_node("llm_node", llm_node)
-graph_builder.add_node("tts_node", tts_node)
+graph_builder.add_node("llm_tts_streaming_node", llm_tts_streaming_node)  # Combined node
 graph_builder.add_node("subconscious_node", subconscious_node)
+
 graph_builder.add_edge(START, "stt_node")
-graph_builder.add_edge("stt_node", "llm_node")
-graph_builder.add_edge("llm_node", "tts_node")
-graph_builder.add_edge("llm_node", "subconscious_node")
-graph_builder.add_edge("tts_node", END)
+graph_builder.add_edge("stt_node", "llm_tts_streaming_node")
+graph_builder.add_edge("llm_tts_streaming_node", "subconscious_node")
+graph_builder.add_edge("llm_tts_streaming_node", END)
 graph_builder.add_edge("subconscious_node", END)
 
 langgraph_pipeline = graph_builder.compile()
