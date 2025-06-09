@@ -86,6 +86,7 @@ class VoiceAssistantWebSocket:
         self.audio_buffers = {}
         self.streaming_vad_events = {}
         self.last_processed_transcript = {}
+        self.transcription_completed_sent = {}
 
     def convert_webm_to_pcm(self, webm_data: bytes) -> bytes:
         """
@@ -106,10 +107,14 @@ class VoiceAssistantWebSocket:
         try:
             if client_id in self.streaming_services:
                 await self.complete_audio_streaming(client_id)  # Cleanup any previous session
+            
+            self.transcription_completed_sent[client_id] = False # Reset flag for new session
+
             service = DeepgramStreamingService()
             # initialize backup transcript store
             service._latest_good_transcript = ""
             final_transcript_holder = {"value": ""}
+            finalized_utterances = []  # <-- NEW: buffer for all finalized utterances
             speech_ended = asyncio.Event()
             self.audio_buffers[client_id] = []
             self.streaming_vad_events[client_id] = speech_ended
@@ -121,14 +126,17 @@ class VoiceAssistantWebSocket:
                     if alternatives and len(alternatives) > 0:
                         token = alternatives[0].transcript
                         logger.info(f"[{client_id}] Transcript event: is_final={is_final}, speech_final={speech_final}, token='{token}'")
-                        # CRITICAL FIX: Only update final transcript with non-empty content
-                        if token.strip():  # Prevent empty strings from overwriting good transcripts
-                            final_transcript_holder["value"] = token
-                            service._latest_good_transcript = token  # keep backup in service as well
-                            logger.info(f"[{client_id}] ✅ Final transcript updated: '{final_transcript_holder['value']}'")
-                            if (is_final or speech_final):
+                        if token.strip():
+                            if is_final or speech_final:
+                                finalized_utterances.append(token.strip())  # <-- APPEND finalized utterance
+                                logger.info(f"[{client_id}] ✅ Appended finalized utterance: '{token.strip()}'")
+                                # Optionally, update the holder with the joined transcript so far
+                                final_transcript_holder["value"] = " ".join(finalized_utterances)
                                 speech_ended.set()
                                 logger.info(f"[{client_id}] ✅ Speech ended event set due to final transcript")
+                            else:
+                                # For partials, just update the holder for live display
+                                final_transcript_holder["value"] = token
                             await manager.send_message(client_id, {"type": "transcript_token", "token": token})
                         else:
                             logger.info(f"[{client_id}] ❌ IGNORING empty transcript, keeping: '{final_transcript_holder['value']}'")
@@ -152,7 +160,8 @@ class VoiceAssistantWebSocket:
             self.streaming_services[client_id] = {
                 "service": service,
                 "speech_ended": speech_ended,
-                "final_transcript_holder": final_transcript_holder
+                "final_transcript_holder": final_transcript_holder,
+                "finalized_utterances": finalized_utterances  # <-- store buffer for later
             }
             await manager.send_status(client_id, "stream_started")
             logger.info(f"[{client_id}] Streaming STT service started successfully")
@@ -207,6 +216,7 @@ class VoiceAssistantWebSocket:
         service = self.streaming_services[client_id]["service"]
         speech_ended = self.streaming_services[client_id]["speech_ended"]
         final_transcript_holder = self.streaming_services[client_id]["final_transcript_holder"]
+        finalized_utterances = self.streaming_services[client_id].get("finalized_utterances", [])  # <-- get buffer
 
         # --- Phase 1: stop sending audio, but keep socket open ---
         await service.stop_audio_only()
@@ -231,11 +241,6 @@ class VoiceAssistantWebSocket:
         if hasattr(service, "_process_pending_events"):
             await service._process_pending_events()
 
-        # If we still don't have a transcript but service captured one, copy it
-        if (not final_transcript_holder["value"].strip()) and getattr(service, "_latest_good_transcript", "").strip():
-            final_transcript_holder["value"] = service._latest_good_transcript
-            logger.info(f"[{client_id}] 🌟 Adopted service._latest_good_transcript before closing: '{final_transcript_holder['value']}'")
-
         # --- Phase 3: close WebSocket ---
         await service.finish_connection()
 
@@ -246,13 +251,17 @@ class VoiceAssistantWebSocket:
                 await service._process_pending_events()
             await asyncio.sleep(0.05)
 
-        # CRITICAL FIX: Use the best available transcript
-        final_transcript = final_transcript_holder['value']
-        if not final_transcript.strip():
-            final_transcript = service.get_accumulated_transcript()
-            logger.info(f"[{client_id}] 🔄 Using accumulated transcript from service: '{final_transcript}'")
+        # CRITICAL FIX: Use the joined finalized utterances as the transcript
+        if finalized_utterances:
+            final_transcript = " ".join(finalized_utterances)
+            logger.info(f"[{client_id}] 📝 Using joined finalized utterances: '{final_transcript}'")
+        else:
+            final_transcript = final_transcript_holder['value']
+            if not final_transcript.strip():
+                final_transcript = service.get_accumulated_transcript()
+                logger.info(f"[{client_id}] 🔄 Using accumulated transcript from service: '{final_transcript}'")
         logger.info(f"[{client_id}] Debug - final_transcript_holder: '{final_transcript_holder['value']}'")
-        logger.info(f"[{client_id}] Debug - service accumulated: '{service.get_accumulated_transcript()}'")
+        logger.info(f"[{client_id}] Debug - finalized_utterances: {finalized_utterances}")
         logger.info(f"[{client_id}] Final transcript at end of streaming: '{final_transcript}'")
         logger.info(f"[{client_id}] Passing transcript to LangGraph: '{final_transcript}'")
         audio_data = b"".join(self.audio_buffers[client_id])
@@ -412,8 +421,10 @@ class VoiceAssistantWebSocket:
                 config=config
             ):
                 if chunk.get("transcript") and not chunk.get("ai_response"):
-                    final_transcript = chunk["transcript"]
-                    await manager.send_status(client_id, "transcription_complete", {"transcript": final_transcript})
+                    if not self.transcription_completed_sent.get(client_id):
+                        final_transcript = chunk["transcript"]
+                        await manager.send_status(client_id, "transcription_complete", {"transcript": final_transcript})
+                        self.transcription_completed_sent[client_id] = True
                 elif chunk.get("ai_response") and not chunk.get("audio_output"):
                     final_ai_response = chunk["ai_response"]
                     await manager.send_status(client_id, "response_generated", {"ai_response": final_ai_response})

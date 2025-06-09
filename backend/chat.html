@@ -252,8 +252,15 @@
         function updateLastMessage(newContent) {
             const tempMsg = document.getElementById('temp-message');
             if (tempMsg) {
+                console.log('🔄 Updating temp message from:', tempMsg.textContent, 'to:', newContent);
                 tempMsg.textContent = newContent;
-                tempMsg.removeAttribute('id');
+                tempMsg.removeAttribute('id'); // Remove temp-message ID
+                tempMsg.setAttribute('data-permanent', 'true'); // Mark as permanent
+                console.log('✅ User message made permanent');
+            } else {
+                console.log('❌ No temp message found to update');
+                // Fallback: add the message if temp message is missing
+                addMessage('user', newContent);
             }
         }
         function appendToLastAIMessage(content) {
@@ -406,7 +413,7 @@
             ws.onerror = (e) => { console.error('WebSocket error:', e); };
             ws.onmessage = (event) => {
                 const msg = JSON.parse(event.data);
-                console.log('WebSocket message:', msg.type, msg); // Debug logging
+                console.log('📨 WebSocket message:', msg.type, msg);
                 if (msg.type === 'status') {
                     if (msg.status === 'speech_detected') {
                         voiceStatus.textContent = '🎙️ Speech detected...';
@@ -414,65 +421,53 @@
                     } else if (msg.status === 'stt_processing') {
                         voiceStatus.textContent = '🔄 Processing speech...';
                         voiceStatus.className = 'voice-status processing';
+                    } else if (msg.status === 'transcription_complete') {
+                        console.log('📝 Transcription complete, updating user message');
+                        updateLastMessage(msg.transcript);
+                        voiceStatus.textContent = '🤖 AI responding...';
+                        voiceStatus.className = 'voice-status processing';
+                        scrollToBottom();
+                        verifyMessageIntegrity();
                     } else if (msg.status === 'llm_streaming') {
                         voiceStatus.textContent = '🤖 AI thinking...';
                         voiceStatus.className = 'voice-status processing';
                     }
                 }
-                else if (msg.type === 'transcription_complete') {
-                    updateLastMessage(msg.transcript);
-                    voiceStatus.textContent = '🤖 AI responding...';
-                    voiceStatus.className = 'voice-status processing';
-                }
                 else if (msg.type === 'token_stream') {
-                    // Stream tokens to the last AI message
-                    const aiMessages = document.querySelectorAll('.message-ai');
-                    const lastAI = aiMessages[aiMessages.length - 1];
-                    if (lastAI) {
-                        lastAI.textContent += msg.content;
-                    } else {
-                        // Only create AI message bubble on first token_stream if none exists
+                    console.log('🔄 Token stream received:', msg.content);
+                    let lastAI = document.querySelector('.message-ai:last-of-type');
+                    if (!lastAI) {
+                        console.log('➕ Creating first AI message');
                         addMessage('ai', msg.content);
+                    } else {
+                        lastAI.textContent += msg.content;
+                    }
+                    verifyMessageIntegrity();
+                }
+                else if (msg.type === 'transcript_token') {
+                    const tempMsg = document.getElementById('temp-message');
+                    if (tempMsg) {
+                        console.log('📝 Updating transcript token:', msg.content);
+                        tempMsg.textContent = msg.content;
                     }
                 }
                 else if (msg.type === 'result') {
-                    // Final result - make sure we don't duplicate
+                    console.log('🏁 Result received, cleaning up');
                     voiceStatus.style.display = 'none';
                     voiceStatus.className = 'voice-status success';
-                    // Remove temp message if exists
+                    // Only remove temp messages that haven't been made permanent
                     const tempMsg = document.getElementById('temp-message');
-                    if (tempMsg) {
+                    if (tempMsg && !tempMsg.hasAttribute('data-permanent')) {
+                        console.log('🗑️ Removing leftover temp message');
                         tempMsg.remove();
+                    } else {
+                        console.log('✅ No temp message to remove');
                     }
-                    // Add final messages only if they don't already exist
-                    const wsData = msg; // preserve outside msg
-                    const messages = Array.from(messagesDiv.children);
-                    const hasUserMessage = messages.some(el => 
-                        el.classList.contains('message-user') &&
-                        el.textContent.includes(wsData.transcript || '🎤 Voice message')
-                    );
-                    const hasAIMessage = messages.some(el => 
-                        el.classList.contains('message-ai') &&
-                        el.textContent === wsData.ai_response
-                    );
-                    if (!hasUserMessage) {
-                        addMessage('user', wsData.transcript || '🎤 Voice message');
-                    }
-                    if (!hasAIMessage) {
-                        addMessage('ai', wsData.ai_response);
-                    }
-                    // Play audio if available
                     if (msg.audio_data) {
                         const audio = new Audio('data:audio/mp3;base64,' + msg.audio_data);
                         audio.play();
                     }
-                }
-                else if (msg.type === 'transcript_token') {
-                    // Real-time transcript updates
-                    const tempMsg = document.getElementById('temp-message');
-                    if (tempMsg) {
-                        tempMsg.textContent = msg.token;
-                    }
+                    verifyMessageIntegrity();
                 }
                 else if (msg.type === 'error') {
                     voiceStatus.textContent = '❌ Error: ' + msg.message;
@@ -531,6 +526,21 @@
                 } else {
                     seen.add(key);
                 }
+            });
+        }
+
+        function verifyMessageIntegrity() {
+            const userMessages = document.querySelectorAll('.message-user');
+            const aiMessages = document.querySelectorAll('.message-ai');
+            console.log('🔍 Message integrity check:');
+            console.log('  User messages:', userMessages.length);
+            console.log('  AI messages:', aiMessages.length);
+            Array.from(messagesDiv.children).forEach((msg, index) => {
+                const type = msg.classList.contains('message-user') ? 'USER' : 'AI';
+                const content = msg.textContent.substring(0, 30) + '...';
+                const isTemp = msg.id === 'temp-message' ? '(TEMP)' : '';
+                const isPermanent = msg.hasAttribute('data-permanent') ? '(PERMANENT)' : '';
+                console.log(`  ${index}: ${type} ${isTemp}${isPermanent} - "${content}"`);
             });
         }
     </script>

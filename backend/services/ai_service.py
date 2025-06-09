@@ -199,3 +199,63 @@ class LocalLLMService:
     def get_response(self, text):
         # Implement local LLM response
         pass
+
+# --- GROQ FAST INFERENCE SERVICE ---
+try:
+    from groq import Groq, AsyncGroq
+except ImportError:
+    Groq = None
+    AsyncGroq = None
+
+class GroqService:
+    """
+    GroqService: Fast LLM inference using Groq's LPU-accelerated API.
+    Supports both sync and async (streaming) completions.
+    """
+    def __init__(self, config=None):
+        # Example config: {"api_key": "...", "model": "llama3-8b-8192"}
+        import os
+        self.config = config or {
+            "api_key": os.environ.get("GROQ_API_KEY"),
+            "model": os.environ.get("GROQ_MODEL", "llama3-8b-8192"),
+            "system_message": "You are a helpful assistant."
+        }
+        if Groq is None:
+            raise ImportError("groq Python package is not installed. Run 'pip install groq'.")
+        self.client = Groq(api_key=self.config["api_key"])
+
+    def get_response(self, text):
+        """Get a fast LLM response from Groq (sync)."""
+        try:
+            response = self.client.chat.completions.create(
+                messages=[
+                    {"role": "system", "content": self.config.get("system_message", "You are a helpful assistant.")},
+                    {"role": "user", "content": text}
+                ],
+                model=self.config["model"]
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            logger.error(f"GroqService error: {e}")
+            return None
+
+    async def get_streaming_response(self, text):
+        """Get a streaming response from Groq (async)."""
+        if AsyncGroq is None:
+            raise ImportError("groq Python package is not installed. Run 'pip install groq'.")
+        import os
+        client = AsyncGroq(api_key=self.config["api_key"])
+        try:
+            # Groq Python client does not natively support streaming tokens yet (as of June 2024),
+            # so we yield the full response for now. Update if/when streaming is supported.
+            response = await client.chat.completions.create(
+                messages=[
+                    {"role": "system", "content": self.config.get("system_message", "You are a helpful assistant.")},
+                    {"role": "user", "content": text}
+                ],
+                model=self.config["model"]
+            )
+            yield response.choices[0].message.content
+        except Exception as e:
+            logger.error(f"GroqService streaming error: {e}")
+            yield f"Error: {str(e)}"

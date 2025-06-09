@@ -6,7 +6,7 @@ import os
 from langgraph.config import get_stream_writer
 import time
 from services.deepgram_service import DeepgramService
-from services.ai_service import OpenRouterService
+from services.ai_service import OpenRouterService, GroqService
 import logging
 from services.deepgram_streaming_service import DeepgramStreamingService
 import uuid
@@ -46,20 +46,30 @@ anticipatory_engine = AnticippatoryIntimacyEngine(mem0_service, intimacy_scaffol
 
 async def stt_node(state: ConversationState, config=None):
     """
-    TEMPORARY: Use file-based STT until streaming frontend is implemented
+    Handles Speech-to-Text. Prioritizes streaming transcript but can
+    fall back to file-based STT if enabled.
     """
-    # If transcript already exists (provided by streaming STT), skip file-based STT
-    transcript = state.get("transcript", "")
-    if transcript:
-        logger.info(f"[{state['client_id']}] Streaming transcript provided to stt_node: '{transcript}'. Skipping file-based STT.")
-        return {"transcript": transcript, "stt_time_ms": 0}
-    else:
-        logger.info(f"[{state['client_id']}] No streaming transcript found in stt_node. Running file-based STT.")
+    fallback_file_stt = False # Set to True to enable file-based fallback
     manager = config.get("configurable", {}).get("manager") if config else None
     client_id = state["client_id"]
+
+    # If transcript already exists (provided by streaming STT), use it
+    transcript = state.get("transcript", "")
+    if transcript:
+        logger.info(f"[{client_id}] Using streaming transcript: '{transcript}'. Skipping file-based STT.")
+        # DO NOT send 'transcription_complete' here, it's handled by the streaming flow
+        return {"transcript": transcript, "stt_time_ms": 0}
+
+    # If no streaming transcript and fallback is disabled, return empty
+    if not fallback_file_stt:
+        logger.warning(f"[{client_id}] No streaming transcript and file-based STT fallback is disabled. Returning empty transcript.")
+        return {"transcript": "", "stt_time_ms": 0}
+    
+    # --- Fallback to File-Based STT (if enabled) ---
+    logger.info(f"[{client_id}] No streaming transcript found. Running file-based STT as fallback.")
+    
     audio_input = state["audio_input"]
     # Use original file-based service
-    from services.deepgram_service import DeepgramService
     file_stt_service = DeepgramService()
     try:
         if manager:
@@ -116,7 +126,8 @@ async def llm_node(state: ConversationState, config=None):
         user_id = state.get("user_id", client_id)
         if manager:
             await manager.send_status(client_id, "llm_streaming")
-        ai_service = OpenRouterService()
+        #ai_service = OpenRouterService()
+        ai_service = GroqService() 
         personality_agent = PersonalityAgent(neo_config)
         # Existing: Get memory-informed context
         intimate_context = await memory_context_builder.build_intimate_context(
@@ -228,16 +239,6 @@ async def subconscious_node(state: ConversationState, config=None):
             logger.debug(f"Skipping subconscious analysis for {user_id} - insufficient conversation data")
             return {}
         logger.info(f"Starting subconscious processing for {user_id}")
-        # ADD: Store conversation memory first (high priority)
-        conversation_memory_manager = ConversationMemoryManager(mem0_service)
-        asyncio.create_task(
-            conversation_memory_manager.store_intimate_conversation(
-                user_message=state["transcript"],
-                ai_response=state["ai_response"],
-                user_id=user_id,
-                emotional_context={"session_id": client_id}
-            )
-        )
         # Real-time relationship analysis
         analysis_insights = await _perform_real_time_analysis(user_id, state)
         # Update scaffold with tiered storage
