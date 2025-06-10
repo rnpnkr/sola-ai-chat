@@ -12,6 +12,7 @@ import logging
 import io
 from PIL import Image, ImageDraw
 from services.chat_service import chat_service
+from datetime import datetime
 logger = logging.getLogger(__name__)
 
 # Import your existing services
@@ -421,22 +422,28 @@ class VoiceAssistantWebSocket:
                 config=config
             ):
                 if chunk.get("transcript") and not chunk.get("ai_response"):
+                    final_transcript = chunk["transcript"]
                     if not self.transcription_completed_sent.get(client_id):
-                        final_transcript = chunk["transcript"]
                         await manager.send_status(client_id, "transcription_complete", {"transcript": final_transcript})
                         self.transcription_completed_sent[client_id] = True
                 elif chunk.get("ai_response") and not chunk.get("audio_output"):
                     final_ai_response = chunk["ai_response"]
                     await manager.send_status(client_id, "response_generated", {"ai_response": final_ai_response})
-                elif chunk.get("audio_output"):
-                    # Store chat when conversation is complete
-                    if final_transcript and final_ai_response:
-                        await self._store_conversation_chat(
+                    logger.info(f"[CHAT_DEBUG] {client_id} - Transcript captured: '{final_transcript[:50] if final_transcript else 'None'}...'")
+                    logger.info(f"[CHAT_DEBUG] {client_id} - AI Response captured: '{final_ai_response[:50] if final_ai_response else 'None'}...'")
+                    # CRITICAL FIX: Store chat immediately when AI response is complete
+                    if final_transcript.strip() and final_ai_response.strip():
+                        storage_task = asyncio.create_task(self._store_conversation_chat(
                             user_id=pipeline_user_id,
                             client_id=client_id,
                             user_message=final_transcript,
                             ai_response=final_ai_response
-                        )
+                        ))
+                        # Verify storage in background (non-blocking)
+                        asyncio.create_task(self._verify_and_retry_storage(
+                            storage_task, pipeline_user_id, client_id, final_transcript, final_ai_response
+                        ))
+                elif chunk.get("audio_output"):
                     await manager.send_result(client_id, {
                         "transcript": chunk["transcript"],
                         "ai_response": chunk["ai_response"],
@@ -449,22 +456,60 @@ class VoiceAssistantWebSocket:
             await manager.send_error(client_id, f"LangGraph failed: {str(e)}")
 
     async def _store_conversation_chat(self, user_id: str, client_id: str, user_message: str, ai_response: str):
-        """Store conversation in chat storage"""
+        """Store conversation in chat storage with robust error handling"""
         try:
             coordinator = get_memory_coordinator()
-            await coordinator.store_chat_and_memory(
+            # Use the new direct storage method
+            result = await coordinator.store_chat_and_memory(
                 user_id=user_id,
-                session_id=client_id,  # Use client_id as session_id
+                session_id=client_id,
                 user_message=user_message,
                 ai_response=ai_response,
                 metadata={
                     "client_id": client_id,
-                    "conversation_type": "voice_chat"
+                    "conversation_type": "voice_chat",
+                    "timestamp": datetime.now().isoformat()
                 }
             )
-            logger.info(f"Stored chat for user {user_id}")
+            logger.info(f"✅ Successfully stored chat for user {user_id}: '{user_message[:50]}...'")
+            return result
         except Exception as e:
-            logger.error(f"Failed to store chat: {e}")
+            logger.error(f"❌ Failed to store chat for user {user_id}: {e}")
+            # Direct fallback to chat service
+            try:
+                from services.chat_service import chat_service
+                await chat_service.store_chat(
+                    user_id=user_id,
+                    session_id=client_id,
+                    user_message=user_message,
+                    ai_response=ai_response,
+                    metadata={"client_id": client_id, "conversation_type": "voice_chat_fallback"}
+                )
+                logger.info(f"✅ Fallback chat storage successful for user {user_id}")
+            except Exception as fallback_error:
+                logger.error(f"❌ Even fallback chat storage failed for user {user_id}: {fallback_error}")
+
+    async def _verify_chat_stored(self, user_id: str, client_id: str) -> bool:
+        """Verify if chat was actually stored"""
+        try:
+            await asyncio.sleep(1.0)  # Wait for storage to complete
+            from services.chat_service import chat_service
+            recent_chats = await chat_service.get_user_chats(user_id, limit=1)
+            return len(recent_chats) > 0
+        except Exception as e:
+            logger.error(f"Chat verification failed: {e}")
+            return False
+
+    async def _verify_and_retry_storage(self, storage_task, user_id: str, client_id: str, transcript: str, ai_response: str):
+        """Verify storage and retry if needed"""
+        try:
+            await storage_task  # Wait for initial storage
+            stored = await self._verify_chat_stored(user_id, client_id)
+            if not stored:
+                logger.warning(f"Chat storage verification failed, retrying for {user_id}")
+                await self._store_conversation_chat(user_id, client_id, transcript, ai_response)
+        except Exception as e:
+            logger.error(f"Storage verification and retry failed: {e}")
 
 
 assistant = VoiceAssistantWebSocket()

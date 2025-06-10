@@ -206,7 +206,7 @@ Respond with the intuitive understanding of someone who truly knows this person'
             await elevenlabs_ws.stream_text_chunk(response)
         # Finish streaming
         await text_buffer.finish()
-        await elevenlabs_ws.finish_streaming()
+        await elevenlabs_ws.flush_and_finish()
         elapsed = time.time() - start_time
         elapsed_ms = int(elapsed * 1000)
         logger.info(f"[{client_id}] Streaming complete: {elapsed_ms} ms. Tokens: {token_count}. Audio chunks: {chunk_count}")

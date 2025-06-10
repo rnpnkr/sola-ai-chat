@@ -283,8 +283,23 @@
         async function loadChatHistory() {
             try {
                 const response = await fetch('/chats?token=' + authToken);
+                if (response.status === 401) {
+                    console.warn('Token expired or invalid. Logging out.');
+                    forceLogout();
+                    return;
+                }
                 const data = await response.json();
                 clearMessages();
+                if (data.detail === 'Invalid token') {
+                    console.warn('Invalid token detail received. Logging out.');
+                    forceLogout();
+                    return;
+                }
+                if (!data.chats || !Array.isArray(data.chats)) {
+                    addMessage('ai', '⚠️ Failed to load chat history. Please try again later.');
+                    console.error('Chat history response invalid:', data);
+                    return;
+                }
                 // Sort chats by creation date to ensure proper order
                 data.chats.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
                 data.chats.forEach(chat => {
@@ -294,8 +309,18 @@
                 // Remove any duplicates that might have been created
                 removeDuplicateMessages();
             } catch (error) {
+                addMessage('ai', '⚠️ Failed to load chat history. Please check your connection.');
                 console.error('Failed to load chat history:', error);
             }
+        }
+
+        function forceLogout() {
+            localStorage.removeItem('auth_token');
+            localStorage.removeItem('username');
+            authToken = null;
+            username = 'User';
+            showAuthModal();
+            document.querySelector('.chat-container').style.display = 'none';
         }
 
         // --- Advanced Voice Streaming Logic (from index.html, renamed) ---
