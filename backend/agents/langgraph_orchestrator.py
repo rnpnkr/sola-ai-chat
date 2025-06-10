@@ -165,6 +165,11 @@ Respond with the intuitive understanding of someone who truly knows this person'
 
 Keep your responses short and concise.
 """
+        # After building the prompt, add this debug logging:
+        logger.info(f"🔍 [DEBUG] Complete LLM prompt being sent:")
+        logger.info(f"🔍 [DEBUG] Intimate context: {intimate_context}")
+        logger.info(f"🔍 [DEBUG] Full prompt length: {len(subconscious_prompt)} chars")
+
         # Setup audio streaming
         writer = get_stream_writer()
         audio_chunks = []

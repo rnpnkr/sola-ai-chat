@@ -66,16 +66,35 @@ class IntimateMemoryService:
                     logger.info("✅ AsyncMemory initialized.")
 
     async def search_intimate_memories(self, query: str, user_id: str, limit: int = 5) -> Dict:
-        """Searches for intimate memories related to the query."""
-        await self._ensure_memory_initialized()
+        """Search for emotionally relevant memories"""
         try:
-            logger.info(f"Searching memories for {user_id} with query: '{query[:50]}...'")
-            results = await self.memory.search(query=query, user_id=user_id, limit=limit)
-            logger.info(f"Found {len(results)} memories for {user_id}")
-            return {"results": results}
+            await self._ensure_memory_initialized()
+            logger.info(f"🔍 [DEBUG] Searching with query: '{query}' for user: {user_id}")
+            
+            # Direct call to Mem0
+            result = await self.memory.search(query=query, user_id=user_id, limit=limit)
+            
+            # DEBUG: Log the exact structure returned by Mem0
+            logger.info(f"🔍 [DEBUG] Raw Mem0 result type: {type(result)}")
+            logger.info(f"🔍 [DEBUG] Raw Mem0 result: {result}")
+            
+            # Normalize the result format
+            if isinstance(result, list):
+                # If Mem0 returns a list directly
+                normalized_result = {"results": result}
+            elif isinstance(result, dict):
+                # If Mem0 returns a dict, use it as-is
+                normalized_result = result
+            else:
+                # Fallback
+                normalized_result = {"results": []}
+            
+            logger.info(f"✅ Memory search successful for {user_id}: {len(normalized_result.get('results', []))} results")
+            return normalized_result
+            
         except Exception as e:
-            logger.error(f"Failed to search intimate memories for {user_id}: {e}")
-            return {"error": str(e), "results": []}
+            logger.error(f"❌ Mem0 search failed for {user_id}: {e}", exc_info=True)
+            return {"results": [], "error": str(e)}
 
     async def store_conversation_memory(self, messages: List[Dict], user_id: str, metadata: Optional[Dict] = None) -> Dict:
         """Stores conversation history as a memory."""

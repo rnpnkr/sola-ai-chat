@@ -22,32 +22,52 @@ class MemoryContextBuilder:
             
             logger.info(f"🔍 Memory search returned {len(memories.get('results', []))} results for {user_id}")
             
-            if memories.get("results"):
-                # The 'mem0' library's search function can return a list of strings.
-                # We need to handle this case, as we were previously expecting a dict.
-                memory_texts = []
-                for i, memory in enumerate(memories["results"]):
+            # DEBUG: Log the raw memory structure
+            logger.info(f"🔍 [DEBUG] Raw memories structure: {memories}")
+            
+            results = memories.get("results", [])
+            if results:
+                formatted_memories = []
+                
+                for i, memory in enumerate(results):
+                    # Handle different memory formats from Mem0
+                    memory_text = ""
+                    
                     if isinstance(memory, dict):
+                        # If it's a dict, try to get the 'memory' field
                         memory_text = memory.get('memory', '')
+                        if not memory_text:
+                            # Try other possible fields
+                            memory_text = memory.get('text', '') or memory.get('content', '') or str(memory)
+                    elif isinstance(memory, str):
+                        # If it's already a string
+                        memory_text = memory
                     else:
+                        # Convert to string as fallback
                         memory_text = str(memory)
                     
                     if memory_text:
                         logger.info(f"🔍 Memory {i+1}: {memory_text[:100]}...")
-                        memory_texts.append(memory_text)
+                        formatted_memories.append(f"- {memory_text}")
+                    else:
+                        logger.warning(f"🔍 Memory {i+1}: Empty or invalid content")
                 
-                # Format memories for LLM context
-                context = "You remember the following about your relationship with the user:\n"
-                context += "\\n".join(f"- {text}" for text in memory_texts)
+                if formatted_memories:
+                    context = "IMPORTANT CONTEXT - What you remember about this person:\n"
+                    context += "\n".join(formatted_memories)
+                    context += "\n\nUSE THIS INFORMATION to provide personalized, contextually aware responses."
+                else:
+                    context = "This is the beginning of your relationship with this person."
             else:
-                context = "You have no specific memories with the user yet."
+                context = "This is the beginning of your relationship with this person."
 
+            logger.info(f"🔍 Final context for LLM: {context[:200]}...")
             logger.info(f"✅ Context built successfully for {user_id}")
             
             return context
             
         except Exception as e:
-            logger.error(f"❌ Context building failed for {user_id}: {e}")
+            logger.error(f"❌ Context building failed for {user_id}: {e}", exc_info=True)
             return "This is the beginning of your relationship with this person."
 
     def _format_intimate_memories(self, memories: Dict) -> str:

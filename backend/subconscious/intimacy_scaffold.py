@@ -86,17 +86,23 @@ class IntimacyScaffoldManager:
             return self._parse_scaffold_from_memories(relationship_insights, recent_conversations, user_id)
             
         except Exception as e:
-            logger.error(f"Error building scaffold from Mem0 for {user_id}: {e}")
+            logger.error(f"Error building scaffold from Mem0 for {user_id}: {e}", exc_info=True)
             return self._get_default_scaffold()
     
     def _parse_scaffold_from_memories(self, relationship_insights: Dict, recent_conversations: Dict, user_id: str) -> IntimacyScaffold:
         """Parse Mem0 memories into IntimacyScaffold structure"""
         
         # Extract relationship insights from background analysis
-        insights_results = relationship_insights.get("results", [])
+        insights_data = relationship_insights.get("results", [])
         recent_results = recent_conversations.get("results", [])
-        
-        if insights_results:
+
+        # Defensive check for inconsistent Mem0 API behavior
+        if isinstance(insights_data, dict):
+            insights_results = [insights_data]  # Wrap single dict in a list
+        else:
+            insights_results = insights_data
+
+        if insights_results and isinstance(insights_results[0], dict):
             # Get the most recent subconscious analysis
             latest_insight = insights_results[0]
             metadata = latest_insight.get("metadata", {})
@@ -131,13 +137,20 @@ class IntimacyScaffoldManager:
             # New user - build basic scaffold from recent conversations
             return self._build_basic_scaffold(recent_results, user_id)
     
-    def _extract_unresolved_threads(self, recent_conversations: List[Dict]) -> List[str]:
+    def _extract_unresolved_threads(self, recent_conversations: List) -> List[str]:
         """Extract ongoing conversation topics that need follow-up"""
         threads = []
         
         for conversation in recent_conversations:
-            memory_text = conversation.get("memory", "").lower()
-            
+            memory_text = ""
+            if isinstance(conversation, dict):
+                memory_text = conversation.get("memory", "").lower()
+            elif isinstance(conversation, str):
+                memory_text = conversation.lower()
+
+            if not memory_text:
+                continue
+
             # Look for unresolved concerns
             if any(indicator in memory_text for indicator in ["worried", "anxious", "concerned", "stressed"]):
                 # Extract the concern
@@ -152,19 +165,26 @@ class IntimacyScaffoldManager:
         
         return threads[:3]  # Keep most recent 3 threads
     
-    def _determine_emotional_mode(self, analysis: Dict, recent_conversations: List[Dict]) -> str:
+    def _determine_emotional_mode(self, analysis: Dict, recent_conversations: List) -> str:
         """Determine current emotional availability mode"""
         
-        # Check recent emotional state
-        if recent_conversations:
-            recent_memory = recent_conversations[0].get("memory", "").lower()
+        # Check recent emotional state - ADD SAFETY CHECK
+        if recent_conversations and len(recent_conversations) > 0:
+            recent_memory = ""
+            first_conversation = recent_conversations[0]
             
-            if any(word in recent_memory for word in ["happy", "excited", "great", "wonderful"]):
-                return "celebrating"
-            elif any(word in recent_memory for word in ["sad", "worried", "stressed", "difficult"]):
-                return "seeking_support"
-            elif any(word in recent_memory for word in ["confused", "thinking", "wondering"]):
-                return "processing"
+            if isinstance(first_conversation, dict):
+                recent_memory = first_conversation.get("memory", "").lower()
+            elif isinstance(first_conversation, str):
+                recent_memory = first_conversation.lower()
+    
+            if recent_memory:  # Only process if we have actual content
+                if any(word in recent_memory for word in ["happy", "excited", "great", "wonderful"]):
+                    return "celebrating"
+                elif any(word in recent_memory for word in ["sad", "worried", "stressed", "difficult"]):
+                    return "seeking_support"
+                elif any(word in recent_memory for word in ["confused", "thinking", "wondering"]):
+                    return "processing"
         
         # Default based on relationship analysis
         emotional_undercurrent = analysis.get("emotional_undercurrent", "")
@@ -226,9 +246,9 @@ class IntimacyScaffoldManager:
         
         return min(score, 1.0)
     
-    def _build_basic_scaffold(self, recent_conversations: List[Dict], user_id: str) -> IntimacyScaffold:
+    def _build_basic_scaffold(self, recent_conversations: List, user_id: str) -> IntimacyScaffold:
         """Build basic scaffold for new users"""
-        conversation_count = len(recent_conversations)
+        conversation_count = len(recent_conversations) if recent_conversations else 0
         
         # Determine basic relationship phase
         if conversation_count < 3:
