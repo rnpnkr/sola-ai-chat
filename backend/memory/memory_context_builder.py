@@ -11,6 +11,8 @@ class MemoryContextBuilder:
     async def build_intimate_context(self, current_message: str, user_id: str) -> str:
         """Build memory-informed context for intimate responses"""
         try:
+            logger.info(f"🔍 Building context for {user_id} with message: '{current_message[:50]}...'")
+            
             # Search for relevant emotional memories
             memories = await self.mem0_service.search_intimate_memories(
                 query=current_message,
@@ -18,12 +20,34 @@ class MemoryContextBuilder:
                 limit=3
             )
             
-            # Format memories for LLM context
-            context = self._format_intimate_memories(memories)
+            logger.info(f"🔍 Memory search returned {len(memories.get('results', []))} results for {user_id}")
+            
+            if memories.get("results"):
+                # The 'mem0' library's search function can return a list of strings.
+                # We need to handle this case, as we were previously expecting a dict.
+                memory_texts = []
+                for i, memory in enumerate(memories["results"]):
+                    if isinstance(memory, dict):
+                        memory_text = memory.get('memory', '')
+                    else:
+                        memory_text = str(memory)
+                    
+                    if memory_text:
+                        logger.info(f"🔍 Memory {i+1}: {memory_text[:100]}...")
+                        memory_texts.append(memory_text)
+                
+                # Format memories for LLM context
+                context = "You remember the following about your relationship with the user:\n"
+                context += "\\n".join(f"- {text}" for text in memory_texts)
+            else:
+                context = "You have no specific memories with the user yet."
+
+            logger.info(f"✅ Context built successfully for {user_id}")
+            
             return context
             
         except Exception as e:
-            logger.error(f"Context building failed: {e}")
+            logger.error(f"❌ Context building failed for {user_id}: {e}")
             return "This is the beginning of your relationship with this person."
 
     def _format_intimate_memories(self, memories: Dict) -> str:

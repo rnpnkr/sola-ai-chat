@@ -90,8 +90,16 @@ class PersistentSubconsciousProcessor:
             "attachment_style_indicators": "secure"  # default
         }
         for memory in results:
-            memory_text = memory.get("memory", "").lower()
-            metadata = memory.get("metadata", {})
+            if isinstance(memory, dict):
+                memory_text = memory.get("memory", "").lower()
+                metadata = memory.get("metadata", {})
+            else:
+                memory_text = str(memory).lower()
+                metadata = {}
+            
+            if not memory_text:
+                continue
+
             # Safety seeking patterns
             if any(word in memory_text for word in ["help", "support", "comfort", "safe", "security"]):
                 attachment_analysis["safety_seeking_count"] += 1
@@ -133,8 +141,16 @@ class PersistentSubconsciousProcessor:
         intimate_disclosure_count = 0
         total_disclosures = len(results)
         for memory in results:
-            memory_text = memory.get("memory", "").lower()
-            metadata = memory.get("metadata", {})
+            if isinstance(memory, dict):
+                memory_text = memory.get("memory", "").lower()
+                metadata = memory.get("metadata", {})
+            else:
+                memory_text = str(memory).lower()
+                metadata = {}
+
+            if not memory_text:
+                continue
+
             # Deep personal sharing
             if any(phrase in memory_text for phrase in ["never told", "secret", "personal", "private", "intimate"]):
                 intimate_disclosure_count += 1
@@ -185,8 +201,16 @@ class PersistentSubconsciousProcessor:
         growth_indicators = 0
         connection_depth_indicators = 0
         for memory in results:
-            memory_text = memory.get("memory", "").lower()
-            metadata = memory.get("metadata", {})
+            if isinstance(memory, dict):
+                memory_text = memory.get("memory", "").lower()
+                metadata = memory.get("metadata", {})
+            else:
+                memory_text = str(memory).lower()
+                metadata = {}
+
+            if not memory_text:
+                continue
+                
             # Growth indicators
             if any(word in memory_text for word in ["growth", "progress", "development", "better", "improve"]):
                 growth_indicators += 1

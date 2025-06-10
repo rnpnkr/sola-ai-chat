@@ -241,103 +241,39 @@ Keep your responses short and concise.
         return {"ai_response": "I'm here for you, let me gather my thoughts...", "audio_output": b""}
 
 async def subconscious_node(state: ConversationState, config=None):
-    """
-    Parallel subconscious processing - updates scaffolds AND stores conversation memory
-    """
+    """Ensure background processing is running and store conversation memory"""
     try:
+        from services.memory_coordinator import get_memory_coordinator
+        from datetime import datetime
         client_id = state["client_id"]
         user_id = state.get("user_id", client_id)
-        # Skip if no meaningful conversation to analyze
-        if not state.get("transcript", "").strip() or not state.get("ai_response", "").strip():
-            logger.debug(f"Skipping subconscious analysis for {user_id} - insufficient conversation data")
-            return {}
-        logger.info(f"Starting subconscious processing for {user_id}")
-        # Real-time relationship analysis
-        analysis_insights = await _perform_real_time_analysis(user_id, state)
-        # Update scaffold with tiered storage
-        await intimacy_scaffold_manager.update_scaffold_real_time(user_id, analysis_insights)
-        logger.info(f"Completed subconscious processing for {user_id}")
+        
+        # FORCE background processing to start
+        logger.info(f"🔄 Ensuring background processing for {user_id}")
+        started = await background_service_manager.ensure_user_background_processing(user_id)
+        if started:
+            logger.info(f"✅ Background processing ensured for {user_id}")
+        
+        # Store conversation memory immediately
+        if state.get("transcript") and state.get("ai_response"):
+            coordinator = get_memory_coordinator()
+            memory_op_id = await coordinator.store_chat_and_memory(
+                user_id=user_id,
+                session_id=client_id,
+                user_message=state["transcript"],
+                ai_response=state["ai_response"],
+                metadata={
+                    "conversation_type": "voice_chat",
+                    "timestamp": datetime.now().isoformat()
+                }
+            )
+            logger.info(f"✅ Memory storage scheduled: {memory_op_id}")
+        
         return {}
+        
     except Exception as e:
-        logger.error(f"Subconscious processing error for {client_id}: {e}")
+        logger.error(f"❌ Subconscious processing error: {e}")
         return {}
-
-async def _perform_real_time_analysis(user_id: str, state: ConversationState) -> dict:
-    """Perform immediate relationship analysis on current conversation"""
-    user_message = state.get("transcript", "")
-    ai_response = state.get("ai_response", "")
-    # Quick emotional analysis of current exchange
-    emotional_indicators = _analyze_current_emotional_state(user_message, ai_response)
-    # Update communication DNA based on this interaction
-    communication_updates = _analyze_communication_style(user_message)
-    # Check for intimacy progression in this conversation
-    intimacy_indicators = _assess_intimacy_progression(user_message, ai_response)
-    # Look for unresolved threads or support needs
-    support_needs = _identify_immediate_support_needs(user_message)
-    return {
-        "timestamp": datetime.now().isoformat(),
-        "emotional_undercurrent": emotional_indicators.get("emotional_state", "neutral"),
-        "communication_preferences": communication_updates,
-        "intimacy_progression": intimacy_indicators,
-        "support_needs": support_needs,
-        "analysis_type": "real_time_conversation"
-    }
-
-def _analyze_current_emotional_state(user_message: str, ai_response: str) -> dict:
-    user_lower = user_message.lower()
-    if any(word in user_lower for word in ["sad", "worried", "stressed", "difficult", "upset"]):
-        return {"emotional_state": "seeking_support", "intensity": "medium"}
-    elif any(word in user_lower for word in ["happy", "excited", "great", "wonderful", "amazing"]):
-        return {"emotional_state": "predominantly_positive", "intensity": "high"}
-    elif any(word in user_lower for word in ["scared", "afraid", "vulnerable", "personal", "private"]):
-        return {"emotional_state": "vulnerability_present", "intensity": "high"}
-    else:
-        return {"emotional_state": "exploring_connection", "intensity": "low"}
-
-def _analyze_communication_style(user_message: str) -> dict:
-    user_lower = user_message.lower()
-    style_indicators = {}
-    if len(user_message.split()) > 20:
-        style_indicators["depth_preference"] = "detailed"
-    elif len(user_message.split()) < 5:
-        style_indicators["depth_preference"] = "concise"
-    else:
-        style_indicators["depth_preference"] = "moderate"
-    if any(word in user_lower for word in ["feel", "feeling", "emotion", "heart"]):
-        style_indicators["emotional_expression"] = "open"
-    else:
-        style_indicators["emotional_expression"] = "reserved"
-    return style_indicators
-
-def _assess_intimacy_progression(user_message: str, ai_response: str) -> dict:
-    user_lower = user_message.lower()
-    intimacy_level = "low"
-    progression_indicators = []
-    if any(phrase in user_lower for phrase in ["never told", "secret", "personal", "private"]):
-        intimacy_level = "high"
-        progression_indicators.append("deep_sharing")
-    elif any(word in user_lower for word in ["worried", "concerned", "share", "open"]):
-        intimacy_level = "medium"
-        progression_indicators.append("personal_sharing")
-    if any(phrase in user_lower for phrase in ["trust you", "comfortable", "feel safe"]):
-        progression_indicators.append("trust_building")
-    return {
-        "current_intimacy_level": intimacy_level,
-        "progression_indicators": progression_indicators
-    }
-
-def _identify_immediate_support_needs(user_message: str) -> list:
-    user_lower = user_message.lower()
-    support_needs = []
-    if any(word in user_lower for word in ["work", "job", "boss", "deadline"]):
-        support_needs.append("work_stress")
-    if any(word in user_lower for word in ["family", "relationship", "friend"]):
-        support_needs.append("relationship_concerns")
-    if any(word in user_lower for word in ["tired", "exhausted", "overwhelmed"]):
-        support_needs.append("emotional_overwhelm")
-    if any(word in user_lower for word in ["decision", "choice", "unsure", "confused"]):
-        support_needs.append("decision_support")
-    return support_needs
 
 # --- Build the graph ---
 graph_builder = StateGraph(ConversationState)

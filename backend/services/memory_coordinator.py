@@ -186,21 +186,25 @@ class MemoryCoordinator:
         """Verify that memory was actually stored successfully"""
         try:
             # Wait a moment for storage to complete
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(1.0)
+            
             # Search for recently stored memory
             search_results = await self.mem0_service.search_intimate_memories(
                 query="recent conversation",
                 user_id=user_id,
                 limit=1
             )
+            
             if search_results.get("results"):
                 logger.info(f"✅ Memory storage verified for operation {operation_id}")
                 return True
             else:
-                logger.warning(f"⚠️ Memory storage verification failed for operation {operation_id}")
+                logger.error(f"❌ Memory storage verification FAILED for operation {operation_id}")
+                # TODO: Add to retry queue or dead letter queue
                 return False
+                
         except Exception as e:
-            logger.error(f"Memory storage verification error: {e}")
+            logger.error(f"❌ Memory storage verification error: {e}")
             return False
     async def _batch_scaffold_updates(self, operations: List[Dict]):
         """Batch process scaffold update operations"""
