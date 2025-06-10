@@ -88,6 +88,45 @@ class VoiceAssistantWebSocket:
         self.streaming_vad_events = {}
         self.last_processed_transcript = {}
         self.transcription_completed_sent = {}
+        # --- NEW: Track active TTS sessions for interruption ---
+        self.active_tts_sessions = {}
+        # --- NEW: Circuit breaker for empty transcripts ---
+        self.empty_response_count = {}
+        self.max_empty_responses = 3
+
+    async def _cleanup_client_session(self, client_id: str):
+        """Safely cleans up all resources associated with a client's streaming session."""
+        logger.info(f"[{client_id}] Cleaning up client session...")
+        
+        # Stop any active TTS session
+        if client_id in self.active_tts_sessions:
+            logger.info(f"[{client_id}] Closing active TTS session during cleanup.")
+            elevenlabs_ws = self.active_tts_sessions.pop(client_id)
+            await elevenlabs_ws.close()
+        
+        # Stop and remove the streaming STT service
+        if client_id in self.streaming_services:
+            streaming_session = self.streaming_services.pop(client_id, None)
+            if streaming_session:
+                service = streaming_session.get("service")
+                if service and service.is_connected():
+                    try:
+                        # CRITICAL FIX: Add a timeout here as well.
+                        await asyncio.wait_for(service.finish_connection(), timeout=1.0)
+                        logger.info(f"[{client_id}] STT service connection closed during cleanup.")
+                    except asyncio.TimeoutError:
+                        logger.warning(f"[{client_id}] Timeout closing STT connection during cleanup.")
+                    except Exception as e:
+                        logger.error(f"[{client_id}] Error closing STT connection during cleanup: {e}")
+        
+        # Clear any related data
+        self.audio_buffers.pop(client_id, None)
+        self.streaming_vad_events.pop(client_id, None)
+        self.last_processed_transcript.pop(client_id, None)
+        self.transcription_completed_sent.pop(client_id, None)
+        self.empty_response_count.pop(client_id, None)
+        
+        logger.info(f"[{client_id}] Client session cleanup complete.")
 
     def convert_webm_to_pcm(self, webm_data: bytes) -> bytes:
         """
@@ -106,12 +145,15 @@ class VoiceAssistantWebSocket:
     async def start_audio_streaming(self, client_id: str, config: dict):
         """Initialize streaming STT service for client."""
         try:
-            if client_id in self.streaming_services:
-                await self.complete_audio_streaming(client_id)  # Cleanup any previous session
+            # --- FIX: Ensure any previous session is fully cleaned up ---
+            await self._cleanup_client_session(client_id)
             
             self.transcription_completed_sent[client_id] = False # Reset flag for new session
 
+            # --- FIX: Create a NEW Deepgram service instance for each session ---
+            # This ensures no state is carried over from previous connections.
             service = DeepgramStreamingService()
+            
             # initialize backup transcript store
             service._latest_good_transcript = ""
             final_transcript_holder = {"value": ""}
@@ -210,72 +252,65 @@ class VoiceAssistantWebSocket:
         self.audio_buffers[client_id].append(audio_data)  # Store original for fallback
 
     async def complete_audio_streaming(self, client_id: str, user_id: str = None):
-        """Complete streaming, trigger LangGraph pipeline, cleanup."""
+        """Complete streaming, trigger LangGraph pipeline, and robustly clean up."""
         if client_id not in self.streaming_services:
             logger.warning(f"No streaming service for client {client_id} on complete.")
             return
-        service = self.streaming_services[client_id]["service"]
-        speech_ended = self.streaming_services[client_id]["speech_ended"]
-        final_transcript_holder = self.streaming_services[client_id]["final_transcript_holder"]
-        finalized_utterances = self.streaming_services[client_id].get("finalized_utterances", [])  # <-- get buffer
 
-        # --- Phase 1: stop sending audio, but keep socket open ---
-        await service.stop_audio_only()
+        service_info = self.streaming_services.get(client_id)
+        if not service_info:
+            return  # Session already cleaned up
 
-        # Send STT processing status for frontend timing (after audio is done, before draining events)
-        await manager.send_status(client_id, "stt_processing")
-
-        # Wait for either VAD-based speech end OR user timeout of 0.4 s
         try:
-            await asyncio.wait_for(speech_ended.wait(), timeout=0.4)
-        except asyncio.TimeoutError:
-            pass  # user may have clicked early; we'll rely on flush below
+            service = service_info["service"]
+            final_transcript_holder = service_info["final_transcript_holder"]
+            finalized_utterances = service_info.get("finalized_utterances", [])
 
-        # --- Phase 2: drain pending Deepgram events for up to 0.6 s ---
-        drain_deadline = asyncio.get_event_loop().time() + 0.6
-        while asyncio.get_event_loop().time() < drain_deadline and not final_transcript_holder["value"]:
-            if hasattr(service, "_process_pending_events"):
-                await service._process_pending_events()
-            await asyncio.sleep(0.05)
+            # 1. Stop sending audio and notify frontend we are processing.
+            await service.stop_audio_only()
+            await manager.send_status(client_id, "stt_processing")
 
-        # After grace period, explicitly process once more
-        if hasattr(service, "_process_pending_events"):
-            await service._process_pending_events()
+            # 2. Give Deepgram a very brief, fixed time to send final transcripts.
+            await asyncio.sleep(0.5) # A fixed, simple wait.
 
-        # --- Phase 3: close WebSocket ---
-        await service.finish_connection()
+            # 3. Force-close the connection, with a timeout to prevent hangs.
+            try:
+                await asyncio.wait_for(service.finish_connection(), timeout=1.0)
+                logger.info(f"[{client_id}] STT connection closed gracefully.")
+            except asyncio.TimeoutError:
+                logger.warning(f"[{client_id}] Timeout waiting for STT connection to close. Forcing cleanup.")
+            except Exception as e:
+                logger.error(f"[{client_id}] Error during STT finish_connection: {e}")
 
-        # --- Phase 4: final drain for late events ---
-        final_deadline = asyncio.get_event_loop().time() + 0.4
-        while asyncio.get_event_loop().time() < final_deadline and not final_transcript_holder["value"]:
-            if hasattr(service, "_process_pending_events"):
-                await service._process_pending_events()
-            await asyncio.sleep(0.05)
+            # 4. Assemble the final transcript from what we received.
+            if finalized_utterances:
+                final_transcript = " ".join(finalized_utterances)
+            else:
+                final_transcript = final_transcript_holder.get('value', '') or service.get_accumulated_transcript()
+            
+            logger.info(f"[{client_id}] Final transcript gathered: '{final_transcript}'")
+            
+            # 5. Get the full audio buffer.
+            audio_data = b"".join(self.audio_buffers.get(client_id, []))
 
-        # CRITICAL FIX: Use the joined finalized utterances as the transcript
-        if finalized_utterances:
-            final_transcript = " ".join(finalized_utterances)
-            logger.info(f"[{client_id}] 📝 Using joined finalized utterances: '{final_transcript}'")
-        else:
-            final_transcript = final_transcript_holder['value']
-            if not final_transcript.strip():
-                final_transcript = service.get_accumulated_transcript()
-                logger.info(f"[{client_id}] 🔄 Using accumulated transcript from service: '{final_transcript}'")
-        logger.info(f"[{client_id}] Debug - final_transcript_holder: '{final_transcript_holder['value']}'")
-        logger.info(f"[{client_id}] Debug - finalized_utterances: {finalized_utterances}")
-        logger.info(f"[{client_id}] Final transcript at end of streaming: '{final_transcript}'")
-        logger.info(f"[{client_id}] Passing transcript to LangGraph: '{final_transcript}'")
-        audio_data = b"".join(self.audio_buffers[client_id])
-        # PATCH: Only process if transcript is non-empty and not a duplicate
-        if final_transcript.strip() == "" or final_transcript == self.last_processed_transcript.get(client_id):
-            logger.info(f"[{client_id}] 🚫 Duplicate/empty transcript, skipping LangGraph processing")
-        else:
-            self.last_processed_transcript[client_id] = final_transcript
-        await self.process_audio_with_langgraph(client_id, audio_data, final_transcript, user_id=user_id)
-        # Cleanup
-        del self.streaming_services[client_id]
-        del self.audio_buffers[client_id]
-        del self.streaming_vad_events[client_id]
+            # 6. Validate transcript and proceed to LangGraph.
+            if not final_transcript.strip() or final_transcript == self.last_processed_transcript.get(client_id):
+                logger.info(f"[{client_id}] 🚫 Empty or duplicate transcript, skipping LangGraph processing.")
+                # We still need to clean up, which will happen in the `finally` block.
+            else:
+                self.last_processed_transcript[client_id] = final_transcript
+                # Schedule LangGraph processing without awaiting it here, to allow for immediate cleanup.
+                asyncio.create_task(
+                    self.process_audio_with_langgraph(client_id, audio_data, final_transcript, user_id=user_id)
+                )
+
+        except Exception as e:
+            logger.error(f"[{client_id}] Error in complete_audio_streaming: {e}")
+            await manager.send_error(client_id, "Sorry, a processing error occurred.")
+        
+        finally:
+            # 7. CRITICAL: Always clean up the session afterward.
+            await self._cleanup_client_session(client_id)
 
     async def process_audio_stream(self, client_id: str, audio_data: bytes):
         """Process audio with real-time status updates"""
@@ -393,9 +428,48 @@ class VoiceAssistantWebSocket:
                 except Exception as e:
                     logger.warning(f"Failed to cleanup {output_path}: {e}")
 
-    async def process_audio_with_langgraph(self, client_id: str, audio_data: bytes, transcript: str = "", user_id: str = None):
-        """Process audio using LangGraph with chat storage"""
+    async def interrupt_ai_speech(self, client_id: str):
+        """Interrupt ongoing AI speech for a client"""
+        logger.info(f"[{client_id}] Received interrupt request.")
+        interrupted = False
         try:
+            if client_id in self.active_tts_sessions:
+                logger.info(f"[{client_id}] Found active TTS session. Attempting interruption...")
+                elevenlabs_ws = self.active_tts_sessions[client_id]
+                await elevenlabs_ws.interrupt_current_speech()
+                interrupted = True
+                logger.info(f"[{client_id}] AI speech interruption successful.")
+            else:
+                logger.info(f"[{client_id}] No active TTS session to interrupt.")
+                interrupted = True # Considered successful if there's nothing to stop
+        except Exception as e:
+            logger.error(f"[{client_id}] Error interrupting AI speech: {e}")
+            interrupted = False
+        finally:
+            # --- FIX: Ensure full cleanup after an interruption attempt ---
+            await self._cleanup_client_session(client_id)
+        return interrupted
+
+    async def process_audio_with_langgraph(self, client_id: str, audio_data: bytes, transcript: str = "", user_id: str = None):
+        """Process audio using LangGraph with chat storage and interruption support"""
+        try:
+            # --- Circuit breaker: prevent processing repeated empty transcripts ---
+            if not transcript.strip():
+                empty_count = self.empty_response_count.get(client_id, 0) + 1
+                self.empty_response_count[client_id] = empty_count
+                if empty_count >= self.max_empty_responses:
+                    logger.warning(f"[{client_id}] Circuit breaker triggered: {empty_count} empty transcripts in a row")
+                    await manager.send_error(client_id, "Please speak clearly and try again")
+                else:
+                    logger.warning(f"[{client_id}] Empty transcript #{empty_count}, ignoring")
+                return  # Do not proceed further for empty transcript
+            else:
+                # Reset counter on successful transcript
+                self.empty_response_count[client_id] = 0
+
+            # NOTE: Interruption is now handled more robustly in the websocket handler
+            # await self.interrupt_ai_speech(client_id)
+
             logger.info(f"[{client_id}] process_audio_with_langgraph received transcript: '{transcript}'")
             await manager.send_status(client_id, "recording_complete")
             pipeline_user_id = user_id if user_id else client_id
@@ -547,7 +621,7 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str, token: Option
                 await assistant.process_audio_stream(client_id, audio_data)
 
             elif message_type == "audio_stream_start":
-                # Initialize streaming STT service
+                # This is now the primary entry point for starting a recording session
                 await assistant.start_audio_streaming(client_id, message.get("config", {}))
 
             elif message_type == "audio_chunk":
@@ -574,6 +648,15 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str, token: Option
             elif message_type == "langgraph_stream":
                 audio_data = base64.b64decode(message["audio_data"])
                 await assistant.process_audio_with_langgraph(client_id, audio_data, user_id=user_id)
+
+            elif message_type == "interrupt_speech":
+                # Handle speech interruption
+                interrupted = await assistant.interrupt_ai_speech(client_id)
+                await manager.send_message(client_id, {
+                    "type": "interruption_result",
+                    "success": interrupted
+                })
+                logger.info(f"[{client_id}] Interruption request processed, result: {interrupted}")
 
             elif message_type == "ping":
                 # Handle ping/keepalive
@@ -631,12 +714,9 @@ async def get_chat_page():
 
 def handle_client_disconnect(client_id: str):
     """Clean up when client disconnects"""
-    # Existing cleanup code...
     manager.disconnect(client_id)
-    # NEW: Flush pending memory operations before disconnect
-    asyncio.create_task(_cleanup_user_memory_operations(client_id))
-    # Existing session completion storage
-    asyncio.create_task(_store_session_completion(client_id))
+    # Use the robust cleanup function
+    asyncio.create_task(assistant._cleanup_client_session(client_id))
     try:
         background_service_manager.stop_user_processing(client_id)
         logger.info(f"Stopped background processing for disconnected client {client_id}")

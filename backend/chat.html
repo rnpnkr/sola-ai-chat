@@ -129,6 +129,13 @@
         .voice-status.success {
             background: #2ed573;
         }
+        .voice-btn.interrupting {
+            background: #ff9500;
+            animation: pulse 0.5s ease-in-out;
+        }
+        .voice-status.interrupting {
+            background: #ff9500;
+        }
         @media (max-width: 700px) {
             .chat-container {
                 max-width: 100vw;
@@ -137,6 +144,61 @@
             .auth-modal-content {
                 min-width: 90vw;
             }
+        }
+
+        /* --- Auth Modal CSS (Fix #1) --- */
+        .auth-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 2000;
+        }
+
+        .auth-modal-content {
+            background: #2a2a2a;
+            padding: 40px;
+            border-radius: 12px;
+            min-width: 400px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+        }
+
+        .auth-modal-content h2 {
+            color: #b3d1ff;
+            margin-bottom: 24px;
+            text-align: center;
+        }
+
+        .auth-modal-content input {
+            width: 100%;
+            padding: 12px;
+            margin-bottom: 16px;
+            border: 1px solid #444;
+            border-radius: 8px;
+            background: #1a1a1a;
+            color: #fff;
+            font-size: 1em;
+        }
+
+        .auth-modal-content button {
+            width: 100%;
+            padding: 12px;
+            background: #4a9eff;
+            border: none;
+            border-radius: 8px;
+            color: white;
+            font-size: 1em;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .auth-modal-content button:hover {
+            background: #3b8ae0;
         }
     </style>
 </head>
@@ -166,9 +228,22 @@
         let authToken = localStorage.getItem('auth_token');
         let username = localStorage.getItem('username') || 'User';
         let ws = null;
-        let isRecording = false;
         let clientId = localStorage.getItem('client_id') || (Math.random().toString(36).slice(2));
         localStorage.setItem('client_id', clientId);
+
+        // --- NEW: Voice State Machine ---
+        const VoiceState = {
+            IDLE: 'IDLE',
+            RECORDING: 'RECORDING',
+            WAITING: 'WAITING',
+            PROCESSING: 'PROCESSING',
+            AI_SPEAKING: 'AI_SPEAKING'
+        };
+        let currentVoiceState = VoiceState.IDLE;
+        
+        // --- NEW: Recording timeout protection (Fix #4) ---
+        let recordingTimeout = null;
+        const MAX_RECORDING_TIME = 30000; // 30 seconds
 
         // --- UI Elements ---
         const authModal = document.getElementById('auth-modal');
@@ -179,6 +254,62 @@
         const messagesDiv = document.getElementById('messages');
         const voiceBtn = document.getElementById('voice-btn');
         const voiceStatus = document.getElementById('voice-status');
+
+        function setVoiceState(newState) {
+            // Enhanced state transition logging (Fix #3)
+            if (currentVoiceState === newState) {
+                // console.log(`State transition ignored: already in ${newState}`);
+                return;
+            }
+            const timestamp = new Date().toISOString().substr(11, 12);
+            console.log(`[${timestamp}] State transition: ${currentVoiceState} -> ${newState}`);
+            
+            // Add validation
+            if (!Object.values(VoiceState).includes(newState)) {
+                console.error(`Invalid state: ${newState}`);
+                return;
+            }
+            currentVoiceState = newState;
+
+            switch (newState) {
+                case VoiceState.IDLE:
+                    voiceBtn.disabled = false;
+                    voiceBtn.innerHTML = '📞';
+                    voiceBtn.classList.remove('recording', 'interrupting');
+                    voiceStatus.style.display = 'none';
+                    break;
+                case VoiceState.RECORDING:
+                    voiceBtn.disabled = false;
+                    voiceBtn.innerHTML = '⏹';
+                    voiceBtn.classList.add('recording');
+                    voiceStatus.textContent = '🎤 Recording...';
+                    voiceStatus.className = 'voice-status';
+                    voiceStatus.style.display = 'block';
+                    break;
+                case VoiceState.WAITING:
+                    voiceBtn.disabled = false;
+                    voiceBtn.innerHTML = '🤔';
+                    voiceBtn.classList.remove('recording');
+                    voiceStatus.textContent = 'Sola is thinking...';
+                    voiceStatus.className = 'voice-status processing';
+                    voiceStatus.style.display = 'block';
+                    break;
+                case VoiceState.PROCESSING:
+                    voiceBtn.disabled = true;
+                    voiceBtn.innerHTML = '🔄';
+                    voiceBtn.classList.remove('recording');
+                    voiceStatus.textContent = '🔄 Processing...';
+                    voiceStatus.className = 'voice-status processing';
+                    voiceStatus.style.display = 'block';
+                    break;
+                case VoiceState.AI_SPEAKING:
+                    voiceBtn.disabled = false;
+                    voiceBtn.innerHTML = '🛑';
+                    voiceBtn.classList.add('interrupting');
+                    voiceStatus.style.display = 'none';
+                    break;
+            }
+        }
 
         // --- Auth Modal Logic ---
         function showAuthModal() {
@@ -283,23 +414,8 @@
         async function loadChatHistory() {
             try {
                 const response = await fetch('/chats?token=' + authToken);
-                if (response.status === 401) {
-                    console.warn('Token expired or invalid. Logging out.');
-                    forceLogout();
-                    return;
-                }
                 const data = await response.json();
                 clearMessages();
-                if (data.detail === 'Invalid token') {
-                    console.warn('Invalid token detail received. Logging out.');
-                    forceLogout();
-                    return;
-                }
-                if (!data.chats || !Array.isArray(data.chats)) {
-                    addMessage('ai', '⚠️ Failed to load chat history. Please try again later.');
-                    console.error('Chat history response invalid:', data);
-                    return;
-                }
                 // Sort chats by creation date to ensure proper order
                 data.chats.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
                 data.chats.forEach(chat => {
@@ -309,31 +425,39 @@
                 // Remove any duplicates that might have been created
                 removeDuplicateMessages();
             } catch (error) {
-                addMessage('ai', '⚠️ Failed to load chat history. Please check your connection.');
                 console.error('Failed to load chat history:', error);
             }
-        }
-
-        function forceLogout() {
-            localStorage.removeItem('auth_token');
-            localStorage.removeItem('username');
-            authToken = null;
-            username = 'User';
-            showAuthModal();
-            document.querySelector('.chat-container').style.display = 'none';
         }
 
         // --- Advanced Voice Streaming Logic (from index.html, renamed) ---
         let streamingSession = null;
         let audioContext = null;
         let processor = null;
-        let streamingActive = false;
 
-        async function startStreamingTest() {
-            if (streamingActive) {
-                stopStreamingTest();
+        async function startRecording() {
+            if (currentVoiceState !== VoiceState.IDLE && currentVoiceState !== VoiceState.AI_SPEAKING) {
+                console.warn(`Attempted to record from invalid state: ${currentVoiceState}`);
                 return;
             }
+            
+            // Clear any previous temp messages and add new one
+            const tempMsg = document.getElementById('temp-message');
+            if (tempMsg) tempMsg.remove();
+            addMessage('user', '🎤 Recording...', true);
+
+            setVoiceState(VoiceState.RECORDING);
+            await startStreamingTest();
+
+            // Add recording timeout (Fix #4)
+            recordingTimeout = setTimeout(() => {
+                if (currentVoiceState === VoiceState.RECORDING) {
+                    console.warn('Recording timeout reached, stopping automatically');
+                    stopStreamingTest();
+                }
+            }, MAX_RECORDING_TIME);
+        }
+
+        async function startStreamingTest() {
             try {
                 streamingSession = { chunks: [], startTime: Date.now() };
                 ws.send(JSON.stringify({
@@ -353,7 +477,7 @@
                 const source = audioContext.createMediaStreamSource(stream);
                 processor = audioContext.createScriptProcessor(1024, 1, 1);
                 processor.onaudioprocess = (event) => {
-                    if (!streamingActive) return;
+                    if (currentVoiceState !== VoiceState.RECORDING) return;
                     const inputBuffer = event.inputBuffer;
                     const audioData = inputBuffer.getChannelData(0);
                     const pcmData = new Int16Array(audioData.length);
@@ -363,162 +487,225 @@
                     }
                     const rawPcmBytes = new Uint8Array(pcmData.buffer);
                     const base64Audio = btoa(String.fromCharCode(...rawPcmBytes));
-                    ws.send(JSON.stringify({
-                        type: 'audio_chunk',
-                        audio_data: base64Audio,
-                        timestamp: Date.now(),
-                        format: 'raw_pcm',
-                        sample_rate: 16000,
-                        channels: 1
-                    }));
+                    if (ws.readyState === WebSocket.OPEN) {
+                        ws.send(JSON.stringify({
+                            type: 'audio_chunk',
+                            audio_data: base64Audio,
+                            timestamp: Date.now(),
+                            format: 'raw_pcm',
+                            sample_rate: 16000,
+                            channels: 1
+                        }));
+                    }
                 };
                 source.connect(processor);
                 processor.connect(audioContext.destination);
-                streamingActive = true;
-                isRecording = true;
-                // Update UI
-                voiceBtn.classList.add('recording');
-                voiceBtn.textContent = '⏹'; // Change to stop icon
-                voiceStatus.style.display = 'block';
                 streamingSession.stream = stream;
-                setTimeout(() => {
-                    if (streamingActive) {
-                        stopStreamingTest();
-                    }
-                }, 10000);
             } catch (error) {
                 alert(`Voice recording failed: ${error.message}`);
-                streamingActive = false;
-                isRecording = false;
+                setVoiceState(VoiceState.IDLE);
             }
         }
 
-        function stopStreamingTest() {
-            if (!streamingActive) return;
-            streamingActive = false;
-            isRecording = false;
+        function stopStreamingTest(sendStreamEnd = true) {
+            // Clear timeout (Fix #4)
+            if (recordingTimeout) {
+                clearTimeout(recordingTimeout);
+                recordingTimeout = null;
+            }
+
+            if (!streamingSession) return;
+
             if (processor) {
                 processor.disconnect();
                 processor = null;
             }
             if (audioContext) {
-                audioContext.close();
+                audioContext.close().catch(console.warn);
                 audioContext = null;
             }
-            if (streamingSession && streamingSession.stream) {
+            if (streamingSession.stream) {
                 streamingSession.stream.getTracks().forEach(track => track.stop());
             }
-            ws.send(JSON.stringify({ type: 'audio_stream_end' }));
-            // Update UI
-            voiceBtn.classList.remove('recording');
-            voiceBtn.textContent = '📞'; // Change back to phone icon
-            voiceStatus.style.display = 'none';
+            if (sendStreamEnd && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'audio_stream_end' }));
+                setVoiceState(VoiceState.WAITING);
+            } else if (!sendStreamEnd) {
+                setVoiceState(VoiceState.IDLE);
+            }
+            streamingSession = null;
         }
 
-        // Connect the voice button to streaming logic
-        voiceBtn.onclick = function() {
-            if (!streamingActive) {
-                // Clear any previous temp messages
-                const tempMsg = document.getElementById('temp-message');
-                if (tempMsg) tempMsg.remove();
-                // Add new recording message
-                addMessage('user', '🎤 Recording...', true);
-                startStreamingTest();
-            } else {
-                stopStreamingTest();
+        // --- Voice Button On-Click Logic (State Machine) ---
+        voiceBtn.onclick = async function() {
+            switch (currentVoiceState) {
+                case VoiceState.IDLE:
+                    await startRecording();
+                    break;
+                case VoiceState.RECORDING:
+                    stopStreamingTest();
+                    break;
+                case VoiceState.WAITING:
+                case VoiceState.AI_SPEAKING:
+                    console.log('🛑 Interrupting AI speech...');
+                    // Stop frontend audio immediately and send backend message
+                    interruptAISpeech();
+                    ws.send(JSON.stringify({ type: 'interrupt_speech' }));
+                    // Immediately start recording for seamless barge-in
+                    await startRecording();
+                    break;
+                case VoiceState.PROCESSING:
+                    // Button is disabled, do nothing
+                    break;
             }
         };
 
-        // --- WebSocket & Voice Logic ---
-        let audioContextStream = null;
-        let audioSourceStream = null;
-        let audioBufferQueue = [];
-        let audioPlaying = false;
-        let audioStreamEnded = false;
-
-        function playBufferedAudio() {
-            if (!audioContextStream) {
-                audioContextStream = new (window.AudioContext || window.webkitAudioContext)();
+        function interruptAISpeech() {
+            console.log('🛑 Frontend: Interrupting AI speech');
+            if (currentPlaybackSession) {
+                currentPlaybackSession.stop(); // Use the new stop method
+                currentPlaybackSession = null;
             }
-            if (audioBufferQueue.length === 0 || audioPlaying) return;
-            audioPlaying = true;
-            const chunk = audioBufferQueue.shift();
-            audioContextStream.decodeAudioData(chunk.buffer.slice(0), (audioBuffer) => {
-                const source = audioContextStream.createBufferSource();
-                source.buffer = audioBuffer;
-                source.connect(audioContextStream.destination);
-                source.onended = () => {
-                    audioPlaying = false;
-                    if (audioBufferQueue.length > 0) {
-                        playBufferedAudio();
-                    } else if (audioStreamEnded) {
-                        // Clean up
-                        audioContextStream.close();
-                        audioContextStream = null;
-                        audioStreamEnded = false;
-                    }
-                };
-                source.start(0);
-            }, (err) => {
-                console.error('Audio decode error:', err);
-                audioPlaying = false;
-            });
+            audioStreamEnded = false; // Reset global flag
+            setVoiceState(VoiceState.IDLE); // Go to IDLE before transitioning to RECORDING
         }
 
+        // --- WebSocket & Voice Logic (REFACTORED for Playback Sessions) ---
+        let currentPlaybackSession = null;
+        let audioStreamEnded = false; // Global flag to know if backend is done
+
+        function createPlaybackSession() {
+            const session = {
+                id: Date.now(),
+                audioContext: new (window.AudioContext || window.webkitAudioContext)(),
+                bufferQueue: [],
+                isPlaying: false,
+                
+                play: function() {
+                    if (this.bufferQueue.length === 0 || this.isPlaying) return;
+                    
+                    this.isPlaying = true;
+                    const chunk = this.bufferQueue.shift();
+                    
+                    // If context is closed, stop.
+                    if (this.audioContext.state === 'closed') {
+                        this.isPlaying = false;
+                        return;
+                    }
+
+                    this.audioContext.decodeAudioData(chunk.buffer.slice(chunk.byteOffset, chunk.byteOffset + chunk.byteLength), 
+                        (audioBuffer) => {
+                            if (this.audioContext.state === 'closed' || currentPlaybackSession !== this) {
+                                console.log(`Orphaned audio chunk from session ${this.id} will not be played.`);
+                                return;
+                            }
+                            const source = this.audioContext.createBufferSource();
+                            source.buffer = audioBuffer;
+                            source.connect(this.audioContext.destination);
+                            source.onended = () => {
+                                // CRITICAL CHECK: only proceed if this is still the active session
+                                if (currentPlaybackSession === this) {
+                                    this.isPlaying = false;
+                                    this.play(); // Attempt to play next chunk
+                                }
+                            };
+                            source.start(0);
+                        }, 
+                        (err) => {
+                            console.error('Audio decode error:', err);
+                            if (currentPlaybackSession === this) {
+                                this.isPlaying = false;
+                            }
+                        }
+                    );
+                },
+
+                addChunk: function(bytes) {
+                    this.bufferQueue.push(bytes);
+                    if (!this.isPlaying) {
+                        this.play();
+                    }
+                },
+
+                stop: function() {
+                    if (this.audioContext && this.audioContext.state !== 'closed') {
+                        this.audioContext.close().catch(e => console.warn("Error closing audio context on stop:", e));
+                    }
+                },
+
+                isFinished: function() {
+                    return audioStreamEnded && !this.isPlaying && this.bufferQueue.length === 0;
+                }
+            };
+            return session;
+        }
+
+        function checkAndFinalizeSpeech() {
+            if (currentPlaybackSession && currentPlaybackSession.isFinished()) {
+                console.log(`🔇 AI speech playback concluded for session ${currentPlaybackSession.id}.`);
+                currentPlaybackSession.stop();
+                currentPlaybackSession = null;
+                audioStreamEnded = false;
+                setVoiceState(VoiceState.IDLE);
+            }
+        }
+        
+        // This is now just a simple observer, called by playback events
+        setInterval(checkAndFinalizeSpeech, 100);
+
+
         function handleAudioChunk(base64Chunk) {
-            // Convert base64 to Uint8Array
+            if (!currentPlaybackSession) {
+                currentPlaybackSession = createPlaybackSession();
+                // When a new session starts, ensure we are in the speaking state
+                setVoiceState(VoiceState.AI_SPEAKING);
+            }
             const binary = atob(base64Chunk);
             const bytes = new Uint8Array(binary.length);
             for (let i = 0; i < binary.length; i++) {
                 bytes[i] = binary.charCodeAt(i);
             }
-            audioBufferQueue.push(bytes);
-            playBufferedAudio();
+            currentPlaybackSession.addChunk(bytes);
         }
 
         function endAudioStream() {
+            console.log('Backend signaled end of audio stream.');
             audioStreamEnded = true;
-            if (!audioPlaying && audioContextStream) {
-                audioContextStream.close();
-                audioContextStream = null;
-                audioStreamEnded = false;
-            }
+            // The checkAndFinalizeSpeech interval will handle the rest
         }
 
         function connectWS() {
             if (ws) ws.close();
             ws = new WebSocket(`ws://${window.location.host}/ws/${clientId}?token=${authToken}`);
             ws.onopen = () => {};
-            ws.onclose = () => {};
-            ws.onerror = (e) => { console.error('WebSocket error:', e); };
+            
+            // WebSocket Error Handling Enhancement (Fix #2)
+            ws.onclose = () => {
+                console.log('WebSocket closed');
+                setVoiceState(VoiceState.IDLE);
+            };
+            ws.onerror = (e) => { 
+                console.error('WebSocket error:', e); 
+                setVoiceState(VoiceState.IDLE);
+            };
+
             ws.onmessage = (event) => {
                 const msg = JSON.parse(event.data);
                 console.log('📨 WebSocket message:', msg.type, msg);
+                
+                if (currentVoiceState === VoiceState.RECORDING && (msg.type === 'status' && msg.status.includes('speech'))) {
+                     voiceStatus.textContent = '🎙️ Speech detected...';
+                }
+
                 if (msg.type === 'status') {
-                    if (msg.status === 'speech_detected') {
-                        voiceStatus.textContent = '🎙️ Speech detected...';
-                        voiceStatus.className = 'voice-status processing';
-                    } else if (msg.status === 'stt_processing') {
-                        voiceStatus.textContent = '🔄 Processing speech...';
-                        voiceStatus.className = 'voice-status processing';
-                    } else if (msg.status === 'transcription_complete') {
-                        console.log('📝 Transcription complete, updating user message');
+                    if (msg.status === 'transcription_complete') {
                         updateLastMessage(msg.transcript);
-                        voiceStatus.textContent = '🤖 AI responding...';
-                        voiceStatus.className = 'voice-status processing';
-                        scrollToBottom();
-                        verifyMessageIntegrity();
-                    } else if (msg.status === 'llm_streaming') {
-                        voiceStatus.textContent = '🤖 AI thinking...';
-                        voiceStatus.className = 'voice-status processing';
                     } else if (msg.status === 'llm_tts_streaming') {
-                        voiceStatus.textContent = '🤖 AI streaming...';
-                        voiceStatus.className = 'voice-status processing';
+                        setVoiceState(VoiceState.AI_SPEAKING);
                     } else if (msg.status === 'streaming_complete') {
-                        console.log('🎵 Full streaming pipeline complete');
-                        voiceStatus.style.display = 'none';
-                        voiceStatus.className = 'voice-status success';
                         endAudioStream();
+                    } else if (msg.status === 'recording_complete') {
+                        setVoiceState(VoiceState.WAITING);
                     }
                 }
                 else if (msg.type === 'token_stream') {
@@ -540,13 +727,14 @@
                     }
                 }
                 else if (msg.type === 'audio_chunk') {
-                    console.log('🔊 Audio chunk received:', msg.chunk_number, 'bytes:', msg.audio_data.length);
                     handleAudioChunk(msg.audio_data);
                 }
                 else if (msg.type === 'result') {
                     console.log('🏁 Result received, cleaning up');
                     voiceStatus.style.display = 'none';
                     voiceStatus.className = 'voice-status success';
+                    // AI finished speaking
+                    setVoiceState(VoiceState.IDLE);
                     // Only remove temp messages that haven't been made permanent
                     const tempMsg = document.getElementById('temp-message');
                     if (tempMsg && !tempMsg.hasAttribute('data-permanent')) {
@@ -566,9 +754,15 @@
                 else if (msg.type === 'error') {
                     voiceStatus.textContent = '❌ Error: ' + msg.message;
                     voiceStatus.className = 'voice-status error';
+                    // AI stopped speaking due to error
+                    setVoiceState(VoiceState.IDLE);
                     setTimeout(() => {
                         voiceStatus.style.display = 'none';
                     }, 3000);
+                }
+                else if (msg.type === 'speech_interrupted' || msg.type === 'interruption_result') {
+                    console.log('Backend confirmed interruption.');
+                    // State is already handled by the click handler, this is just a confirmation.
                 }
             };
         }

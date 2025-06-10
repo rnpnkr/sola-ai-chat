@@ -122,6 +122,7 @@ async def llm_tts_streaming_node(state: ConversationState, config=None):
     Streams LLM tokens directly to ElevenLabs WebSocket
     """
     try:
+        from voice_assistant import assistant
         from agents.personality_agent import PersonalityAgent, neo_config
         manager = config.get("configurable", {}).get("manager") if config else None
         client_id = state["client_id"]
@@ -133,6 +134,8 @@ async def llm_tts_streaming_node(state: ConversationState, config=None):
         personality_agent = PersonalityAgent(neo_config)
         elevenlabs_ws = ElevenLabsWebSocketService()
         text_buffer = StreamingTextBuffer(min_chunk_size=15, max_chunk_size=100)
+        # --- Store TTS session in global assistant instance for interruption support ---
+        assistant.active_tts_sessions[client_id] = elevenlabs_ws
         # Prepare context (same as before)
         intimate_context = await memory_context_builder.build_intimate_context(
             current_message=state["transcript"],
@@ -158,7 +161,10 @@ Support Needs: {', '.join(intimacy_scaffold.support_needs) if intimacy_scaffold.
 
 Current conversation: {state['transcript']}
 
-Respond with the intuitive understanding of someone who truly knows this person's emotional landscape, current needs, and relationship dynamic."""
+Respond with the intuitive understanding of someone who truly knows this person's emotional landscape, current needs, and relationship dynamic.
+
+Keep your responses short and concise.
+"""
         # Setup audio streaming
         writer = get_stream_writer()
         audio_chunks = []
@@ -220,6 +226,8 @@ Respond with the intuitive understanding of someone who truly knows this person'
         # Send completion status
         if manager:
             await manager.send_status(client_id, "streaming_complete")
+        # --- Cleanup TTS session tracking ---
+        assistant.active_tts_sessions.pop(client_id, None)
         return {
             "ai_response": response,
             "audio_output": b"",  # Empty to avoid duplicate playback; chunks already streamed
@@ -227,6 +235,8 @@ Respond with the intuitive understanding of someone who truly knows this person'
             "tts_time_ms": elapsed_ms
         }
     except Exception as e:
+        # --- Cleanup on error ---
+        assistant.active_tts_sessions.pop(client_id, None)
         logger.error(f"[{client_id}] Streaming error: {str(e)}")
         return {"ai_response": "I'm here for you, let me gather my thoughts...", "audio_output": b""}
 

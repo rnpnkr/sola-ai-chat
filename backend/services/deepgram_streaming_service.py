@@ -80,6 +80,9 @@ class DeepgramStreamingService:
             logger.warning("Deepgram connection not active. Dropping audio chunk.")
             return
         # Validate chunk size and content
+        if not audio_data or len(audio_data) < 1024:
+            logger.debug(f"Insufficient audio data: {len(audio_data) if audio_data else 0} bytes, skipping")
+            return
         if not audio_data or len(audio_data) != 2048:
             logger.warning(f"Dropping audio chunk: invalid size ({len(audio_data) if audio_data else 0} bytes), expected 2048 bytes of raw PCM.")
             return
