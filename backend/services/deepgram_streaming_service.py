@@ -151,10 +151,36 @@ class DeepgramStreamingService:
             return
         logger.info(f"[DeepgramStreamingService] TRANSCRIPT RESULT TYPE: {type(result)}")
         # Store for async processing
-        if hasattr(self, '_pending_transcripts'):
-            self._pending_transcripts.append(result)
+        # Avoid pushing duplicate or empty final transcripts to the queue to
+        # prevent double-processing on the caller side. Deepgram sometimes
+        # sends an extra `is_final` message with an empty `transcript` string
+        # right after the real final message. That leads to logs such as
+        # "processing 2 transcripts" even though only one meaningful utterance
+        # exists. We simply drop empty finals or consecutive duplicates.
+
+        transcript_text: str = ""
+        if hasattr(result, 'channel') and hasattr(result.channel, 'alternatives'):
+            transcript_text = result.channel.alternatives[0].transcript or ""
+
+        # Deduplication conditions
+        should_enqueue = True
+        if not transcript_text.strip():
+            # Empty transcript – very common artefact – skip.
+            should_enqueue = False
         else:
-            self._pending_transcripts = [result]
+            # Skip consecutive duplicates (compare with latest good transcript)
+            if transcript_text.strip() == getattr(self, '_latest_good_transcript', ""):
+                # Only skip if *both* have is_final flag to avoid losing early partials
+                if getattr(result, 'is_final', False):
+                    should_enqueue = False
+
+        if should_enqueue:
+            if hasattr(self, '_pending_transcripts'):
+                self._pending_transcripts.append(result)
+            else:
+                self._pending_transcripts = [result]
+        else:
+            logger.info("[DeepgramStreamingService] 🚫 Skipping empty/duplicate final transcript event")
         # Try to extract transcript for immediate logging
         try:
             if hasattr(result, 'channel') and hasattr(result.channel, 'alternatives'):

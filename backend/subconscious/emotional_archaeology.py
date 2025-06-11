@@ -1,282 +1,196 @@
-from typing import List, Dict, Optional
-from datetime import datetime, timedelta
+from __future__ import annotations
+
+"""subconscious.emotional_archaeology
+
+Responsible for analysing emotionally-salient memories (vulnerability, joy, pain) so that
+long-running background processes can reason about the user at a deeper level.
+
+The class wraps the existing IntimateMemoryService so that it can execute its own
+semantic searches against Mem0 while still supporting direct analysis of already-fetched
+search results (this allows us to reuse the same search data if another component has
+fetched it earlier in the pipeline).
+
+All public methods are kept **async** to avoid blocking the event-loop when they need to
+perform network IO. Pure analysis helpers are synchronous.
+"""
+
 import logging
+from datetime import datetime
+from typing import Dict, List
+
 from memory.mem0_async_service import IntimateMemoryService
 
 logger = logging.getLogger(__name__)
 
+__all__ = ["EmotionalArchaeology"]
+
+
 class EmotionalArchaeology:
+    """Extracts fine-grained emotional patterns from a user's memories."""
+
+    # Keyword pools for the three core emotional strata we currently support
+    _VULNERABILITY_KEYWORDS = (
+        "vulnerable scared worried personal sharing afraid secret private disclosure fear anxious"
+    )
+    _JOY_KEYWORDS = (
+        "happy excited thrilled joyful celebrate delighted gratitude proud love enjoyable"
+    )
+    _PAIN_KEYWORDS = (
+        "struggle difficult challenge pain frustration recurring hurt sad grief lonely upset"
+    )
+
     def __init__(self, mem0_service: IntimateMemoryService):
         self.mem0_service = mem0_service
 
-    async def mine_vulnerability_moments(self, user_id: str) -> List[Dict]:
-        """Extract times user opened up emotionally"""
-        try:
-            vulnerable_memories = await self.mem0_service.search_intimate_memories(
-                query="vulnerable scared worried personal sharing afraid anxious fear",
-                user_id=user_id,
-                limit=15
-            )
-            
-            return self._analyze_vulnerability_patterns(vulnerable_memories)
-        except Exception as e:
-            logger.error(f"Vulnerability mining failed for {user_id}: {e}")
-            return []
+    # ---------------------------------------------------------------------
+    # High-level helpers that *both* search and analyse in a single call
+    # ---------------------------------------------------------------------
 
-    async def extract_joy_patterns(self, user_id: str) -> List[Dict]:
-        """Identify what genuinely makes user happy"""
-        try:
-            joy_memories = await self.mem0_service.search_intimate_memories(
-                query="happy excited grateful celebrate achievement joy love",
-                user_id=user_id,
-                limit=15
-            )
-            
-            return self._analyze_joy_patterns(joy_memories)
-        except Exception as e:
-            logger.error(f"Joy pattern extraction failed for {user_id}: {e}")
-            return []
+    async def mine_vulnerability_moments(self, user_id: str, limit: int = 25) -> Dict:
+        """Run a vulnerability-focused semantic search and return pattern analysis."""
+        data = await self.mem0_service.search_intimate_memories(
+            query=self._VULNERABILITY_KEYWORDS,
+            user_id=user_id,
+            limit=limit,
+        )
+        return self._analyse_vulnerability_patterns(data)
 
-    async def map_pain_points(self, user_id: str) -> List[Dict]:
-        """Find recurring struggles and emotional triggers"""
-        try:
-            pain_memories = await self.mem0_service.search_intimate_memories(
-                query="stressed struggle difficult problem upset frustrated",
-                user_id=user_id,
-                limit=15
-            )
-            
-            return self._analyze_pain_patterns(pain_memories)
-        except Exception as e:
-            logger.error(f"Pain point mapping failed for {user_id}: {e}")
-            return []
+    async def extract_joy_patterns(self, user_id: str, limit: int = 25) -> Dict:
+        """Find joyful memories and extract intensity/timestamps."""
+        data = await self.mem0_service.search_intimate_memories(
+            query=self._JOY_KEYWORDS,
+            user_id=user_id,
+            limit=limit,
+        )
+        return self._analyse_emotional_pattern(
+            data, positive=True, label="joy_patterns", keywords=self._JOY_KEYWORDS.split()
+        )
 
-    async def track_growth_arcs(self, user_id: str) -> Dict:
-        """How user has evolved emotionally over time"""
-        try:
-            # Get memories from different time periods
-            all_memories = await self.mem0_service.search_intimate_memories(
-                query="growth change better improve learned progress",
-                user_id=user_id,
-                limit=20
-            )
-            
-            return self._track_emotional_evolution(all_memories)
-        except Exception as e:
-            logger.error(f"Growth tracking failed for {user_id}: {e}")
-            return {}
+    async def map_pain_points(self, user_id: str, limit: int = 25) -> Dict:
+        """Detect recurring pain/struggle points in the user's memories."""
+        data = await self.mem0_service.search_intimate_memories(
+            query=self._PAIN_KEYWORDS,
+            user_id=user_id,
+            limit=limit,
+        )
+        return self._analyse_emotional_pattern(
+            data, positive=False, label="pain_points", keywords=self._PAIN_KEYWORDS.split()
+        )
 
-    def _analyze_vulnerability_patterns(self, memories: Dict) -> List[Dict]:
-        """Analyze vulnerability moments for patterns"""
-        results = memories.get("results", [])
-        if not results:
-            return []
+    # ------------------------------------------------------------------
+    # Public *analysis-only* helpers (operate on already fetched data)
+    # ------------------------------------------------------------------
 
-        vulnerability_patterns = []
-        for memory in results:
-            memory_text = memory.get("memory", "")
-            metadata = memory.get("metadata", {})
-            
-            # Extract vulnerability context
-            vulnerability_level = self._assess_vulnerability_level(memory_text)
-            emotional_context = metadata.get("emotional_context", {})
-            
-            vulnerability_patterns.append({
-                "memory": memory_text,
-                "vulnerability_level": vulnerability_level,
-                "emotional_context": emotional_context,
-                "timestamp": metadata.get("timestamp"),
-                "triggers": self._identify_vulnerability_triggers(memory_text)
-            })
+    def analyse_vulnerability_data(self, vulnerability_data: Dict) -> Dict:
+        """Expose the vulnerability analysis for already-fetched search data."""
+        return self._analyse_vulnerability_patterns(vulnerability_data)
 
-        return vulnerability_patterns
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
 
-    def _analyze_joy_patterns(self, memories: Dict) -> List[Dict]:
-        """Analyze what brings user joy"""
-        results = memories.get("results", [])
-        if not results:
-            return []
+    def _safe_iter_results(self, search_payload: Dict) -> List[Dict]:
+        """Normalise the search results into a predictable list of dicts."""
+        results = search_payload.get("results", []) if isinstance(search_payload, dict) else []
+        # Mem0 occasionally returns a single dict instead of list – normalise
+        if isinstance(results, dict):
+            return [results]
+        return list(results)
 
-        joy_patterns = []
-        for memory in results:
-            memory_text = memory.get("memory", "")
-            metadata = memory.get("metadata", {})
-            
-            joy_triggers = self._identify_joy_triggers(memory_text)
-            intensity = self._assess_joy_intensity(memory_text)
-            
-            joy_patterns.append({
-                "memory": memory_text,
-                "joy_triggers": joy_triggers,
-                "intensity": intensity,
-                "timestamp": metadata.get("timestamp"),
-                "context": metadata.get("emotional_context", {})
-            })
-
-        return joy_patterns
-
-    def _analyze_pain_patterns(self, memories: Dict) -> List[Dict]:
-        """Analyze recurring pain points and triggers"""
-        results = memories.get("results", [])
-        if not results:
-            return []
-
-        pain_patterns = []
-        for memory in results:
-            memory_text = memory.get("memory", "")
-            metadata = memory.get("metadata", {})
-            
-            pain_triggers = self._identify_pain_triggers(memory_text)
-            severity = self._assess_pain_severity(memory_text)
-            
-            pain_patterns.append({
-                "memory": memory_text,
-                "pain_triggers": pain_triggers,
-                "severity": severity,
-                "timestamp": metadata.get("timestamp"),
-                "coping_mechanisms": self._identify_coping_responses(memory_text)
-            })
-
-        return pain_patterns
-
-    def _assess_vulnerability_level(self, text: str) -> str:
-        """Assess how vulnerable/open the sharing was"""
-        vulnerability_indicators = {
-            "high": ["secret", "never told", "personal", "private", "scared", "afraid"],
-            "medium": ["worried", "concerned", "nervous", "unsure"],
-            "low": ["think", "maybe", "probably"]
+    def _analyse_vulnerability_patterns(self, vulnerability_data: Dict) -> Dict:
+        """Core logic extracted from *background_processor* with minor refactor."""
+        results = self._safe_iter_results(vulnerability_data)
+        analysis = {
+            "disclosure_depth": "surface",
+            "vulnerability_comfort": 0.0,
+            "intimate_sharing_events": [],
+            "emotional_expression_types": [],
+            "authentic_moments": [],
         }
-        
-        text_lower = text.lower()
-        high_count = sum(1 for indicator in vulnerability_indicators["high"] if indicator in text_lower)
-        medium_count = sum(1 for indicator in vulnerability_indicators["medium"] if indicator in text_lower)
-        
-        if high_count >= 2:
-            return "high"
-        elif high_count >= 1 or medium_count >= 2:
-            return "medium"
+        intimate_disclosure_count = 0
+        total_disclosures = len(results)
+
+        # Keyword mappings preserved from original implementation
+        emotion_keywords = {
+            "fear": ["scared", "afraid", "terrified", "fear"],
+            "sadness": ["sad", "crying", "heartbroken", "grief"],
+            "joy": ["happy", "excited", "thrilled", "joyful"],
+            "anger": ["angry", "furious", "mad", "irritated"],
+            "shame": ["ashamed", "embarrassed", "humiliated"],
+            "love": ["love", "adore", "cherish", "devoted"],
+        }
+
+        for memory in results:
+            memory_text = str(memory.get("memory", "")).lower() if isinstance(memory, dict) else str(memory).lower()
+            metadata = memory.get("metadata", {}) if isinstance(memory, dict) else {}
+            if not memory_text:
+                continue
+
+            # Deep personal sharing detection
+            if any(p in memory_text for p in ["never told", "secret", "personal", "private", "intimate"]):
+                intimate_disclosure_count += 1
+                analysis["intimate_sharing_events"].append(
+                    {
+                        "memory": memory_text[:100],
+                        "timestamp": metadata.get("timestamp"),
+                        "depth": "deep",
+                    }
+                )
+
+            # Emotion extraction
+            emotions_found = [e for e, kws in emotion_keywords.items() if any(k in memory_text for k in kws)]
+            if emotions_found:
+                analysis["emotional_expression_types"].extend(emotions_found)
+
+            # Authenticity markers
+            if any(p in memory_text for p in ["authentic", "real", "genuine", "true self", "honest"]):
+                analysis["authentic_moments"].append(memory_text[:100])
+
+        # Aggregate metrics
+        analysis["vulnerability_comfort"] = intimate_disclosure_count / max(total_disclosures, 1)
+        if intimate_disclosure_count >= 3:
+            analysis["disclosure_depth"] = "deep"
+        elif intimate_disclosure_count >= 1:
+            analysis["disclosure_depth"] = "moderate"
         else:
-            return "low"
+            analysis["disclosure_depth"] = "surface"
 
-    def _identify_vulnerability_triggers(self, text: str) -> List[str]:
-        """What made them feel vulnerable"""
-        triggers = []
-        trigger_keywords = {
-            "relationships": ["family", "friend", "partner", "relationship"],
-            "work": ["job", "work", "career", "boss"],
-            "health": ["sick", "health", "medical", "doctor"],
-            "finances": ["money", "financial", "expensive", "afford"],
-            "self_worth": ["failure", "mistake", "wrong", "stupid"]
-        }
-        
-        text_lower = text.lower()
-        for category, keywords in trigger_keywords.items():
-            if any(keyword in text_lower for keyword in keywords):
-                triggers.append(category)
-        
-        return triggers
+        return analysis
 
-    def _identify_joy_triggers(self, text: str) -> List[str]:
-        """What brings them joy"""
-        triggers = []
-        joy_keywords = {
-            "achievement": ["accomplished", "proud", "succeeded", "won"],
-            "relationships": ["friend", "family", "loved", "connected"],
-            "creativity": ["created", "made", "art", "music", "write"],
-            "nature": ["outside", "nature", "walk", "sunshine"],
-            "learning": ["learned", "discovered", "understood", "knowledge"]
-        }
-        
-        text_lower = text.lower()
-        for category, keywords in joy_keywords.items():
-            if any(keyword in text_lower for keyword in keywords):
-                triggers.append(category)
-        
-        return triggers
+    def _analyse_emotional_pattern(
+        self,
+        search_data: Dict,
+        *,
+        positive: bool,
+        label: str,
+        keywords: List[str],
+    ) -> Dict:
+        """Generic analyser for positive/negative emotional patterns."""
+        results = self._safe_iter_results(search_data)
+        pattern_results = []
+        intensity_sum = 0
 
-    def _assess_joy_intensity(self, text: str) -> str:
-        """How intense was the joy"""
-        high_intensity = ["amazing", "incredible", "best", "perfect", "love"]
-        medium_intensity = ["good", "happy", "nice", "pleased"]
-        
-        text_lower = text.lower()
-        if any(word in text_lower for word in high_intensity):
-            return "high"
-        elif any(word in text_lower for word in medium_intensity):
-            return "medium"
-        else:
-            return "low"
-
-    def _identify_pain_triggers(self, text: str) -> List[str]:
-        """What causes them stress/pain"""
-        triggers = []
-        pain_keywords = {
-            "work_stress": ["deadline", "pressure", "overwhelmed", "busy"],
-            "relationship_conflict": ["fight", "argument", "disagree", "tension"],
-            "financial_pressure": ["expensive", "afford", "money", "budget"],
-            "health_concerns": ["tired", "sick", "pain", "exhausted"],
-            "self_criticism": ["failure", "mistake", "stupid", "wrong"]
-        }
-        
-        text_lower = text.lower()
-        for category, keywords in pain_keywords.items():
-            if any(keyword in text_lower for keyword in keywords):
-                triggers.append(category)
-        
-        return triggers
-
-    def _assess_pain_severity(self, text: str) -> str:
-        """How severe was the pain/stress"""
-        high_severity = ["terrible", "awful", "worst", "devastating", "crushing"]
-        medium_severity = ["difficult", "hard", "tough", "stressful"]
-        
-        text_lower = text.lower()
-        if any(word in text_lower for word in high_severity):
-            return "high"
-        elif any(word in text_lower for word in medium_severity):
-            return "medium"
-        else:
-            return "low"
-
-    def _identify_coping_responses(self, text: str) -> List[str]:
-        """How they cope with pain/stress"""
-        coping_mechanisms = []
-        coping_keywords = {
-            "social_support": ["talked", "friend", "help", "support"],
-            "self_care": ["rest", "sleep", "exercise", "relax"],
-            "problem_solving": ["plan", "solve", "figure", "organize"],
-            "avoidance": ["ignore", "avoid", "escape", "distract"]
-        }
-        
-        text_lower = text.lower()
-        for mechanism, keywords in coping_keywords.items():
-            if any(keyword in text_lower for keyword in keywords):
-                coping_mechanisms.append(mechanism)
-        
-        return coping_mechanisms
-
-    def _track_emotional_evolution(self, memories: Dict) -> Dict:
-        """Track how user has grown/changed over time"""
-        results = memories.get("results", [])
-        if not results:
-            return {}
-
-        # Group by time periods and analyze evolution
-        evolution = {
-            "emotional_maturity": "developing",
-            "coping_skills": "improving",
-            "self_awareness": "growing",
-            "growth_areas": []
-        }
-
-        growth_indicators = []
         for memory in results:
-            memory_text = memory.get("memory", "").lower()
-            if any(word in memory_text for word in ["learned", "realized", "understand", "growth"]):
-                growth_indicators.append(memory_text)
+            memory_text = str(memory.get("memory", "")).lower() if isinstance(memory, dict) else str(memory).lower()
+            metadata = memory.get("metadata", {}) if isinstance(memory, dict) else {}
+            if not memory_text:
+                continue
 
-        if len(growth_indicators) > 3:
-            evolution["emotional_maturity"] = "advanced"
-            evolution["self_awareness"] = "high"
+            intensity = sum(word in memory_text for word in keywords) / len(keywords)
+            intensity_sum += intensity
+            pattern_results.append(
+                {
+                    "memory": memory_text[:100],
+                    "timestamp": metadata.get("timestamp"),
+                    "intensity": round(intensity, 2),
+                }
+            )
 
-        return evolution
+        average_intensity = round(intensity_sum / max(len(pattern_results), 1), 2)
+        return {
+            "pattern": label,
+            "average_intensity": average_intensity,
+            "occurrences": pattern_results,
+            "generated_at": datetime.utcnow().isoformat(),
+            "positive": positive,
+        }

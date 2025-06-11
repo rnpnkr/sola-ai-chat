@@ -67,11 +67,23 @@ class PersistentSubconsciousProcessor:
                     limit=25
                 )
                 # Process all psychological data into comprehensive insights
+                attachment_patterns = self._analyze_attachment_patterns(attachment_data)
+
+                # --- DELEGATED TO EmotionalArchaeology ---
+                vulnerability_patterns = self.emotional_archaeology.analyse_vulnerability_data(
+                    vulnerability_data
+                )
+
+                # --- DELEGATED TO RelationshipEvolutionTracker ---
+                relationship_evolution = self.relationship_tracker.analyse_relationship_evolution_data(
+                    relationship_data
+                )
+
                 relationship_insight = self._synthesize_psychological_analysis(
-                    attachment_patterns=self._analyze_attachment_patterns(attachment_data),
-                    vulnerability_patterns=self._analyze_vulnerability_patterns(vulnerability_data),
-                    relationship_evolution=self._analyze_relationship_evolution(relationship_data),
-                    user_id=user_id
+                    attachment_patterns=attachment_patterns,
+                    vulnerability_patterns=vulnerability_patterns,
+                    relationship_evolution=relationship_evolution,
+                    user_id=user_id,
                 )
                 await self._store_relationship_evolution(user_id, relationship_insight)
                 await self.scaffold_manager.trigger_backup_storage(user_id)
