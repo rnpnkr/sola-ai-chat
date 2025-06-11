@@ -5,6 +5,7 @@ import logging
 from memory.mem0_async_service import IntimateMemoryService
 import asyncio
 from services.memory_coordinator import get_memory_coordinator
+from .graph_query_service import GraphQueryService
 
 logger = logging.getLogger(__name__)
 
@@ -23,11 +24,19 @@ class IntimacyScaffold:
     conversation_count: int = 0
     intimacy_score: float = 0.0
 
+    # Graph-derived relationship intelligence
+    emotional_relationship_map: Optional[Dict[str, List[str]]] = field(default_factory=dict)
+    trust_progression_path: Optional[List[str]] = field(default_factory=list)
+    vulnerability_pattern_graph: Optional[List[str]] = field(default_factory=list)
+    support_network_context: Optional[List[str]] = field(default_factory=list)
+    relationship_depth_graph: Optional[Dict[str, float]] = field(default_factory=dict)
+
 class IntimacyScaffoldManager:
     """Manages real-time access to relationship state with <150ms guarantee"""
     
     def __init__(self, mem0_service: IntimateMemoryService):
         self.mem0_service = mem0_service
+        self.graph_query_service = GraphQueryService()
         self.scaffold_cache = {}  # In-memory cache for <150ms access
         self.cache_ttl = 300  # 5 minutes cache TTL
         self.pending_storage_tasks = {}  # Track async storage tasks
@@ -130,6 +139,21 @@ class IntimacyScaffoldManager:
             
             # Calculate overall intimacy score
             scaffold.intimacy_score = self._calculate_intimacy_score(scaffold)
+            
+            # ---- Graph-derived intelligence ---------------------------------
+            try:
+                scaffold.emotional_relationship_map = {
+                    "recent_emotions": self.graph_query_service.get_recent_emotional_context(user_id)
+                }
+                scaffold.trust_progression_path = self.graph_query_service.analyze_trust_progression(user_id)
+                scaffold.vulnerability_pattern_graph = self.graph_query_service.map_vulnerability_pattern(user_id)
+                scaffold.support_network_context = self.graph_query_service.support_network_context(user_id)
+                # Placeholder depth graph
+                scaffold.relationship_depth_graph = {
+                    "depth_score": scaffold.intimacy_score
+                }
+            except Exception as gerr:
+                logger.warning("Graph enrichment failed for scaffold %s: %s", user_id, gerr)
             
             return scaffold
         

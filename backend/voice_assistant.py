@@ -863,6 +863,33 @@ async def get_session_chats(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/health/memory")
+def memory_health():
+    return MemoryHealthMonitor().get_health_report()
+
+# ---------------------------------------------------------------------------
+# Graph health endpoint
+
+
+@app.get("/health/graph")
+async def graph_health_check():
+    """Check if Neo4j graph store is reachable and constraints valid."""
+    try:
+        from backend.subconscious.graph_schema import ensure_constraints
+        ensure_constraints()
+        return {
+            "status": "healthy",
+            "graph_store": "neo4j_connected",
+            "hybrid_mode": "vector_and_graph",
+        }
+    except Exception as e:
+        return {
+            "status": "degraded",
+            "graph_store": "unavailable",
+            "hybrid_mode": "vector_only_fallback",
+            "error": str(e),
+        }
+
 if __name__ == "__main__":
     import uvicorn
 

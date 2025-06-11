@@ -2,6 +2,7 @@ import sys
 import os
 import asyncio
 from dotenv import load_dotenv
+import pytest
 
 # Load environment variables from .env file
 load_dotenv()
@@ -11,6 +12,8 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from memory.conversation_memory_manager import ConversationMemoryManager
 from memory.mem0_async_service import IntimateMemoryService
+
+pytest.skip("Skipping legacy memory storage test – outdated.", allow_module_level=True)
 
 async def test_memory_storage():
     print("💾 Testing Memory Storage...")

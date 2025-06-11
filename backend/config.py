@@ -66,3 +66,11 @@ SUPABASE_CONFIG = {
     "service_role_key": os.getenv("SUPABASE_SERVICE_ROLE_KEY", ""),
     "project_id": os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 }
+
+# Neo4j Configuration (graph store)
+NEO4J_CONFIG = {
+    "uri": os.getenv("NEO4J_URI", ""),
+    "username": os.getenv("NEO4J_USERNAME", "neo4j"),
+    "password": os.getenv("NEO4J_PASSWORD", ""),
+    "database": os.getenv("NEO4J_DATABASE", "neo4j"),
+}

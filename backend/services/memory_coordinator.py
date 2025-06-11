@@ -121,6 +121,8 @@ class MemoryCoordinator:
             await self._batch_scaffold_updates(operations)
         elif operation_type == "relationship_evolution":
             await self._batch_relationship_evolution(operations)
+        elif operation_type == "graph_relationship":
+            await self._batch_graph_relationships(operations)
         else:
             # Fallback: process individually
             for op in operations:
@@ -395,6 +397,29 @@ class MemoryCoordinator:
         time_window = int(time.time() // 3600)  # 1-hour buckets
         hash_input = f"{user_id}|{normalized_user}|{normalized_ai}|{time_window}"
         return hashlib.md5(hash_input.encode()).hexdigest()
+
+    async def _batch_graph_relationships(self, operations: List[Dict]):
+        """Batch create graph relationships using GraphRelationshipBuilder."""
+        try:
+            from backend.subconscious.graph_builder import GraphRelationshipBuilder
+            builder = GraphRelationshipBuilder()
+            for op in operations:
+                content = op["content"]
+                rel_type = content.get("relationship_type")
+                user_id = op["user_id"]
+                if rel_type == "feels":
+                    builder.add_feels(user_id, content.get("emotion"), content.get("intensity"))
+                elif rel_type == "triggered_by":
+                    builder.add_triggered_by(user_id, content.get("emotion"), content.get("event"))
+                elif rel_type == "disclosure":
+                    builder.add_disclosure_relationship(user_id, content.get("event"), content.get("intimacy_level"))
+                elif rel_type == "connection":
+                    builder.add_emotional_connection(user_id, content.get("emotion1"), content.get("emotion2"), content.get("connection_type", "leads_to"))
+            builder.close()
+        except Exception as e:
+            logger.error(f"Graph relationship batching failed: {e}")
+            # Re-raise to put operations back for retry
+            raise
 
 # Global instance
 memory_coordinator = None

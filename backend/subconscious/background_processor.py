@@ -338,6 +338,7 @@ class PersistentSubconsciousProcessor:
         """Store relationship evolution using coordinated memory operations - CACHE-AWARE"""
         try:
             from services.memory_coordinator import get_memory_coordinator
+            from subconscious.graph_builder import GraphRelationshipBuilder
             coordinator = get_memory_coordinator()
             
             system_message = {
@@ -364,6 +365,57 @@ class PersistentSubconsciousProcessor:
             await self._update_cache_if_fresher(user_id, relationship_insight)
             
             logger.info(f"Scheduled relationship evolution storage for {user_id}")
+            
+            # ---- Graph Relationship Creation ------------------------------
+            try:
+                primary_emotion = relationship_insight.get("emotional_undercurrent", "").split("+")[0].strip()
+                if primary_emotion:
+                    builder = GraphRelationshipBuilder()
+                    builder.add_feels(user_id, primary_emotion)
+
+                # Disclosure relationship if vulnerability comfort high
+                vuln_comfort = relationship_insight.get("psychological_profile", {}).get("vulnerability_comfort", 0)
+                if vuln_comfort and vuln_comfort > 0.5:
+                    builder.add_disclosure_relationship(
+                        user_id,
+                        "High vulnerability comfort detected",
+                        str(vuln_comfort),
+                    )
+
+                # Emotional connection: anxious leads to trust progression
+                attachment_style = relationship_insight.get("psychological_profile", {}).get("attachment_style")
+                if attachment_style == "anxious":
+                    builder.add_emotional_connection(user_id, "Anxiety", "Trust", "leads_to")
+
+                # 🔥 NEW INTIMATE AI RELATIONSHIPS ----------------------------
+                support_needs = relationship_insight.get("support_needs", [])
+                if "comfort" in support_needs:
+                    builder.add_comfort_relationship(
+                        user_id,
+                        "AI companion interaction",
+                        "Anxiety",
+                    )
+
+                trust_level = relationship_insight.get("relationship_depth", {}).get("trust_level", "")
+                if trust_level in ["established", "intimate_companionship", "deep"]:
+                    builder.add_trust_milestone(
+                        user_id,
+                        f"Trust progression to {trust_level} level",
+                        trust_level,
+                    )
+
+                emotional_themes = relationship_insight.get("emotional_undercurrent", "").split("+")
+                if len(emotional_themes) >= 2:
+                    builder.add_emotional_evolution(
+                        user_id,
+                        emotional_themes[0].strip().title(),
+                        emotional_themes[1].strip().title(),
+                        "Conversation progression",
+                    )
+
+                builder.close()
+            except Exception as gbe:
+                logger.warning("Graph relationship creation failed for %s: %s", user_id, gbe)
             
         except Exception as e:
             logger.error(f"Failed to schedule relationship evolution for {user_id}: {e}")

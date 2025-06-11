@@ -5,6 +5,7 @@ import logging
 from urllib.parse import urlparse
 from mem0 import AsyncMemory
 from mem0.configs.base import MemoryConfig
+from config import NEO4J_CONFIG
 
 logger = logging.getLogger(__name__)
 
@@ -34,8 +35,21 @@ class IntimateMemoryService:
             }
         }
 
+        # Graph store configuration (Neo4j)
+        graph_store_config = {
+            "provider": "neo4j",
+            "config": {
+                "url": NEO4J_CONFIG.get("uri"),
+                "username": NEO4J_CONFIG.get("username"),
+                "password": NEO4J_CONFIG.get("password"),
+                "database": NEO4J_CONFIG.get("database", "neo4j"),
+                "base_label": False,
+            },
+        }
+
         self.config = MemoryConfig(
             vector_store=vector_store_config,
+            graph_store=graph_store_config,
             llm={
                 "provider": "openai",
                 "config": {
@@ -47,9 +61,10 @@ class IntimateMemoryService:
                 "provider": "openai",
                 "config": {
                     "api_key": os.getenv("OPENAI_API_KEY"),
-                    "model": os.getenv("OPEN_AI_EMBEDDING_MODEL", "text-embedding-3-small")
+                    "model": os.getenv("OPEN_AI_EMBEDDING_MODEL", "text-embedding-3-small"),
                 }
             },
+            version="v1.1",
         )
 
     async def _ensure_memory_initialized(self):

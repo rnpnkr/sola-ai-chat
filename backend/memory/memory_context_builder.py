@@ -4,11 +4,18 @@ import hashlib
 from .mem0_async_service import IntimateMemoryService
 import logging
 
+# Graph query integration
+try:
+    from subconscious.graph_query_service import GraphQueryService
+except ImportError:
+    GraphQueryService = None  # Graph not available
+
 logger = logging.getLogger(__name__)
 
 class MemoryContextBuilder:
     def __init__(self, mem0_service: IntimateMemoryService):
         self.mem0_service = mem0_service
+        self.graph_query_service = GraphQueryService() if GraphQueryService else None
         # 🎯 NEW: simple in-memory cache to avoid redundant searches during an active conversation
         self.search_cache: Dict[str, Dict] = {}
         self.cache_ttl: int = 30  # seconds
@@ -38,7 +45,15 @@ class MemoryContextBuilder:
             logger.info(f"🔍 [DEBUG] Raw memories structure: {memories}")
             
             results = memories.get("results", [])
-            if results:
+            relationship_lines: List[str] = []
+            # Fetch recent emotional context via graph if available
+            if self.graph_query_service:
+                try:
+                    relationship_lines = self.graph_query_service.get_recent_emotional_context(user_id)
+                except Exception as gerr:
+                    logger.warning("Graph query failed for %s: %s", user_id, gerr)
+
+            if results or relationship_lines:
                 formatted_memories = []
                 
                 for i, memory in enumerate(results):
@@ -64,9 +79,17 @@ class MemoryContextBuilder:
                     else:
                         logger.warning(f"🔍 Memory {i+1}: Empty or invalid content")
                 
+                context_parts = []
                 if formatted_memories:
-                    context = "IMPORTANT CONTEXT - What you remember about this person:\n"
-                    context += "\n".join(formatted_memories)
+                    context_parts.append("IMPORTANT CONTEXT - What you remember about this person:")
+                    context_parts.extend(formatted_memories)
+
+                if relationship_lines:
+                    context_parts.append("\nRECENT EMOTIONAL CONTEXT:")
+                    context_parts.extend([f"- {line}" for line in relationship_lines])
+
+                if context_parts:
+                    context = "\n".join(context_parts)
                     context += "\n\nUSE THIS INFORMATION to provide personalized, contextually aware responses."
                 else:
                     context = "This is the beginning of your relationship with this person."
