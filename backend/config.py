@@ -43,6 +43,15 @@ OPENROUTER_CONFIG = {
     "site_name": os.getenv("OPENROUTER_SITE_NAME", "Voice Assistant")
 }
 
+# Add Groq configuration section if not present
+GROQ_CONFIG = {
+    "api_key": os.getenv("GROQ_API_KEY", ""),
+    "model": os.getenv("GROQ_MODEL", "llama-3.1-8b-instant"),  # Fast model
+    "max_tokens": int(os.getenv("GROQ_MAX_TOKENS", "1000")),
+    "temperature": float(os.getenv("GROQ_TEMPERATURE", "0.7")),
+    "system_message": "You are a helpful AI companion. Keep responses concise and conversational."
+}
+
 # Memory Enhancement Configuration
 MEMORY_ENHANCEMENT_CONFIG = {
     "model": os.getenv("OPENROUTER_MODEL_MEMORY_ENHANCER", "meta-llama/llama-3.1-8b-instruct:free"),

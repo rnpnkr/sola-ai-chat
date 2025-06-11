@@ -213,13 +213,9 @@ class GroqService:
     Supports both sync and async (streaming) completions.
     """
     def __init__(self, config=None):
-        # Example config: {"api_key": "...", "model": "llama3-8b-8192"}
-        import os
-        self.config = config or {
-            "api_key": os.environ.get("GROQ_API_KEY"),
-            "model": os.environ.get("GROQ_MODEL", "llama3-8b-8192"),
-            "system_message": "You are a helpful assistant."
-        }
+        from config import GROQ_CONFIG  # Import the config
+        self.config = config or GROQ_CONFIG  # Use GROQ_CONFIG instead of environment directly
+        
         if Groq is None:
             raise ImportError("groq Python package is not installed. Run 'pip install groq'.")
         self.client = Groq(api_key=self.config["api_key"])
@@ -243,19 +239,28 @@ class GroqService:
         """Get a streaming response from Groq (async)."""
         if AsyncGroq is None:
             raise ImportError("groq Python package is not installed. Run 'pip install groq'.")
-        import os
+        
         client = AsyncGroq(api_key=self.config["api_key"])
         try:
-            # Groq Python client does not natively support streaming tokens yet (as of June 2024),
-            # so we yield the full response for now. Update if/when streaming is supported.
-            response = await client.chat.completions.create(
+            # Enable REAL streaming with stream=True
+            stream = await client.chat.completions.create(
                 messages=[
                     {"role": "system", "content": self.config.get("system_message", "You are a helpful assistant.")},
                     {"role": "user", "content": text}
                 ],
-                model=self.config["model"]
+                model=self.config["model"],
+                stream=True,  # THIS IS THE CRITICAL FIX
+                temperature=self.config.get("temperature", 0.7),
+                max_tokens=self.config.get("max_tokens", 1000)
             )
-            yield response.choices[0].message.content
+            
+            # Stream actual tokens as they arrive
+            async for chunk in stream:
+                if chunk.choices[0].delta.content is not None:
+                    content = chunk.choices[0].delta.content
+                    logger.debug(f"[Groq Streaming] Token: {content}")
+                    yield content
+                    
         except Exception as e:
             logger.error(f"GroqService streaming error: {e}")
             yield f"Error: {str(e)}"

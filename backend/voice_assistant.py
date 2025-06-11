@@ -13,7 +13,7 @@ import io
 from PIL import Image, ImageDraw
 from services.chat_service import chat_service
 from datetime import datetime
-logger = logging.getLogger(__name__)
+from shared_state import active_conversations  # NEW IMPORT
 
 # Import your existing services
 from services.deepgram_service import DeepgramService
@@ -453,6 +453,13 @@ class VoiceAssistantWebSocket:
     async def process_audio_with_langgraph(self, client_id: str, audio_data: bytes, transcript: str = "", user_id: str = None):
         """Process audio using LangGraph with chat storage and interruption support"""
         try:
+            # ------------------------------------------------------------------
+            # Mark conversation as ACTIVE for background processors to see
+            # ------------------------------------------------------------------
+            if user_id:
+                active_conversations.add(user_id)
+                logger.info(f"User {user_id} marked as ACTIVE. Current active users: {list(active_conversations)}")
+
             # --- Circuit breaker: prevent processing repeated empty transcripts ---
             if not transcript.strip():
                 empty_count = self.empty_response_count.get(client_id, 0) + 1
@@ -528,6 +535,13 @@ class VoiceAssistantWebSocket:
         except Exception as e:
             logger.error(f"LangGraph processing error: {e}")
             await manager.send_error(client_id, f"LangGraph failed: {str(e)}")
+        finally:
+            # ------------------------------------------------------------------
+            # Conversation finished (or errored) → mark INACTIVE
+            # ------------------------------------------------------------------
+            if user_id:
+                active_conversations.discard(user_id)
+                logger.info(f"User {user_id} marked as INACTIVE. Current active users: {list(active_conversations)}")
 
     async def _store_conversation_chat(self, user_id: str, client_id: str, user_message: str, ai_response: str):
         """Store conversation in chat storage with robust error handling"""

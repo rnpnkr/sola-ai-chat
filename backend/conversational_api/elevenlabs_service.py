@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 from elevenlabs.client import ElevenLabs
 from elevenlabs.conversational_ai.conversation import Conversation
 from elevenlabs.conversational_ai.default_audio_interface import DefaultAudioInterface
-from custom_audio_interface import WaveformAudioInterface
+from backend.conversational_api.custom_audio_interface import WaveformAudioInterface
 
 # Load environment variables once
 load_dotenv()

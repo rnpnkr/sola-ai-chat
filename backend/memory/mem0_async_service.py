@@ -75,8 +75,8 @@ class IntimateMemoryService:
             result = await self.memory.search(query=query, user_id=user_id, limit=limit)
             
             # DEBUG: Log the exact structure returned by Mem0
-            logger.info(f"🔍 [DEBUG] Raw Mem0 result type: {type(result)}")
-            logger.info(f"🔍 [DEBUG] Raw Mem0 result: {result}")
+            #logger.info(f"🔍 [DEBUG] Raw Mem0 result type: {type(result)}")
+            #logger.info(f"🔍 [DEBUG] Raw Mem0 result: {result}")
             
             # Normalize the result format
             if isinstance(result, list):

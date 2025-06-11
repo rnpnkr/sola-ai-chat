@@ -24,7 +24,7 @@ class ElevenLabsWebSocketService:
     async def connect_streaming_session(self, audio_callback: Callable[[bytes], None]):
         """Connect to Multi-Context WebSocket endpoint"""
         self.audio_callback = audio_callback
-        uri = f"wss://api.elevenlabs.io/v1/text-to-speech/{self.voice_id}/multi-stream-input?model_id=eleven_turbo_v2_5"
+        uri = f"wss://api.elevenlabs.io/v1/text-to-speech/{self.voice_id}/multi-stream-input?model_id=eleven_flash_v2_5"
         try:
             self.websocket = await ws_connect(uri)
             self.is_connected = True
@@ -50,7 +50,8 @@ class ElevenLabsWebSocketService:
                 "use_speaker_boost": True
             },
             "generation_config": {
-                "chunk_length_schedule": [120, 160, 250, 290]
+                "chunk_length_schedule": [120, 160, 250, 290],
+                "auto_mode": True
             },
             "output_format": "mp3_22050_32"
         }

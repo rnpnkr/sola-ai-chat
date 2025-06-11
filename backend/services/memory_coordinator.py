@@ -6,6 +6,8 @@ from collections import defaultdict
 from memory.mem0_async_service import IntimateMemoryService
 from services.memory_context_enhancer import MemoryContextEnhancer
 from services.chat_service import chat_service
+import time
+import hashlib
 
 logger = logging.getLogger(__name__)
 
@@ -19,9 +21,11 @@ class MemoryCoordinator:
         self.batch_timers = {}  # user_id -> asyncio.Task
         self.operation_deduplication = {}  # content_hash -> operation_id
         # Configuration
-        self.batch_window_ms = 1500  # 1.5 seconds batching window
-        self.max_batch_size = 5
+        self.batch_window_ms = 2000  # 2 seconds batching window (slightly increased)
+        self.max_batch_size = 5  # aligned with new batching guidance
         self.max_concurrent_users = 10
+        # Track recent conversation hashes to avoid duplicate UPDATE storm
+        self.recent_hashes: Dict[str, float] = {}
     async def schedule_memory_operation(
         self, 
         user_id: str, 
@@ -332,6 +336,18 @@ class MemoryCoordinator:
         metadata: Optional[Dict] = None
     ) -> str:
         """Store both chat and memory in parallel"""
+        # ------------------------------------------------------------------
+        # Duplicate conversation guard (10-minute window)
+        # ------------------------------------------------------------------
+        content_hash = self._generate_content_hash(user_message, ai_response, user_id)
+        if content_hash in self.recent_hashes:
+            if time.time() - self.recent_hashes[content_hash] < 600:
+                logger.info(f"Skipping duplicate conversation within 10 minutes for {user_id}")
+                return "duplicate_skipped"
+
+        # Record hash timestamp
+        self.recent_hashes[content_hash] = time.time()
+
         # Store chat immediately (high priority)
         chat_task = asyncio.create_task(
             chat_service.store_chat(
@@ -364,6 +380,21 @@ class MemoryCoordinator:
         await chat_task
         
         return memory_operation_id
+
+    # ------------------------------------------------------------------
+    # Deduplication helpers
+    # ------------------------------------------------------------------
+    def _generate_content_hash(self, user_message: str, ai_response: str, user_id: str) -> str:
+        """Generate a robust hash that is stable for a 1-hour window.
+
+        This prevents the same user_message/ai_response pair from being stored
+        repeatedly within a short period while still allowing legitimate
+        repetitions in the future (after the window expires)."""
+        normalized_user = user_message.strip().lower()
+        normalized_ai = ai_response.strip().lower()
+        time_window = int(time.time() // 3600)  # 1-hour buckets
+        hash_input = f"{user_id}|{normalized_user}|{normalized_ai}|{time_window}"
+        return hashlib.md5(hash_input.encode()).hexdigest()
 
 # Global instance
 memory_coordinator = None

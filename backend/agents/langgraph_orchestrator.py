@@ -197,10 +197,21 @@ Keep your responses short and concise.
         response = ""
         start_time = time.time()
         token_count = 0
+        first_token_time = None
+
         if hasattr(ai_service, 'get_streaming_response'):
             async for chunk in ai_service.get_streaming_response(subconscious_prompt):
+                if first_token_time is None:
+                    first_token_time = time.time()
+                    ttft = int((first_token_time - start_time) * 1000)
+                    logger.info(f"🚀 [LATENCY] Time to first token: {ttft}ms")
+                
                 response += chunk
                 token_count += 1
+                
+                # Log every 10th token to verify streaming
+                if token_count % 10 == 0:
+                    logger.info(f"[Streaming] Received {token_count} tokens, latest: '{chunk}'")
                 # Send token to frontend
                 if manager:
                     await manager.send_message(client_id, {

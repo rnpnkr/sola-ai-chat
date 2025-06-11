@@ -1,4 +1,6 @@
 from typing import Dict, List
+import time
+import hashlib
 from .mem0_async_service import IntimateMemoryService
 import logging
 
@@ -7,13 +9,23 @@ logger = logging.getLogger(__name__)
 class MemoryContextBuilder:
     def __init__(self, mem0_service: IntimateMemoryService):
         self.mem0_service = mem0_service
+        # 🎯 NEW: simple in-memory cache to avoid redundant searches during an active conversation
+        self.search_cache: Dict[str, Dict] = {}
+        self.cache_ttl: int = 30  # seconds
 
     async def build_intimate_context(self, current_message: str, user_id: str) -> str:
         """Build memory-informed context for intimate responses"""
         try:
+            # --- CACHE CHECK --------------------------------------------------
+            cache_key = f"{user_id}:{hashlib.md5(current_message.encode()).hexdigest()}"
+            cache_entry = self.search_cache.get(cache_key)
+            if cache_entry and (time.time() - cache_entry["timestamp"] < self.cache_ttl):
+                logger.info(f"🎯 Using cached memory search for {user_id}")
+                return cache_entry["context"]
+
             logger.info(f"🔍 Building context for {user_id} with message: '{current_message[:50]}...'")
             
-            # Search for relevant emotional memories
+            # Search for relevant emotional memories (cache miss)
             memories = await self.mem0_service.search_intimate_memories(
                 query=current_message,
                 user_id=user_id,
@@ -63,6 +75,12 @@ class MemoryContextBuilder:
 
             logger.info(f"🔍 Final context for LLM: {context[:200]}...")
             logger.info(f"✅ Context built successfully for {user_id}")
+            
+            # --- STORE IN CACHE ---------------------------------------------
+            self.search_cache[cache_key] = {
+                "context": context,
+                "timestamp": time.time()
+            }
             
             return context
             

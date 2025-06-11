@@ -6,6 +6,7 @@ from memory.mem0_async_service import IntimateMemoryService
 from .emotional_archaeology import EmotionalArchaeology
 from .relationship_evolution import RelationshipEvolutionTracker
 from .intimacy_scaffold import IntimacyScaffoldManager
+from shared_state import active_conversations
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +38,14 @@ class PersistentSubconsciousProcessor:
         """Run every 3 minutes - psychologically-optimized analysis with 3 core searches"""
         while user_id in self.active_processors:
             try:
+                # Skip heavy background work if the user is currently in an active real-time conversation.
+                if user_id in active_conversations:
+                    logger.info(
+                        f"Skipping background analysis for {user_id} - user is in active conversation"
+                    )
+                    await asyncio.sleep(180)  # Wait 3 minutes before next check
+                    continue
+
                 logger.info(f"Running psychological analysis cycle for {user_id}")
                 await self._coordinate_with_realtime(user_id)
                 # PSYCHOLOGICAL SEARCH 1: Attachment & Safety Seeking
