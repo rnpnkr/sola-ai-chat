@@ -29,12 +29,15 @@ class MemoryContextBuilder:
 
             logger.info(f"🔍 Building context for {user_id} with message: '{current_message[:50]}...'")
             
-            # Search for relevant emotional memories (cache miss)
+            # --- Measure Mem0 search latency ---------------------------------
+            mem0_start = time.perf_counter()
             memories = await self.mem0_service.search_intimate_memories(
                 query=current_message,
                 user_id=user_id,
                 limit=3
             )
+            mem0_elapsed = int((time.perf_counter() - mem0_start) * 1000)
+            logger.info(f"⏱️ Mem0 search for {user_id} took {mem0_elapsed} ms")
             
             logger.info(f"🔍 Memory search returned {len(memories.get('results', []))} results for {user_id}")
             
@@ -46,7 +49,10 @@ class MemoryContextBuilder:
             # Fetch recent emotional context via graph if available
             if self.graph_query_service:
                 try:
+                    graph_start = time.perf_counter()
                     relationship_lines = self.graph_query_service.get_recent_emotional_context(user_id)
+                    graph_elapsed = int((time.perf_counter() - graph_start) * 1000)
+                    logger.info(f"⏱️ Graph emotional context query for {user_id} took {graph_elapsed} ms")
                 except Exception as gerr:
                     logger.warning("Graph query failed for %s: %s", user_id, gerr)
 

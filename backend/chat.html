@@ -200,6 +200,35 @@
         .auth-modal-content button:hover {
             background: #3b8ae0;
         }
+
+        /* Loading overlay */
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: rgba(0,0,0,0.85);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #ffffff;
+            font-size: 1.3em;
+            z-index: 3000;
+        }
+        .spinner {
+            border: 6px solid #3b3b3b;
+            border-top: 6px solid #4a9eff;
+            border-radius: 50%;
+            width: 48px;
+            height: 48px;
+            animation: spin 1s linear infinite;
+            margin-right: 16px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
     </style>
 </head>
 <body>
@@ -223,6 +252,13 @@
         </div>
     </div>
     <div class="voice-status" id="voice-status">🎤 Recording...</div>
+    <!-- 🔄 Loading overlay shown while backend warms intimacy scaffold -->
+    <div class="loading-overlay" id="loading-overlay" style="display:none;">
+        <div style="display:flex; align-items:center;">
+            <div class="spinner"></div>
+            <span>Preparing your conversation...</span>
+        </div>
+    </div>
     <script>
         // --- Auth & State ---
         let authToken = localStorage.getItem('auth_token');
@@ -254,6 +290,7 @@
         const messagesDiv = document.getElementById('messages');
         const voiceBtn = document.getElementById('voice-btn');
         const voiceStatus = document.getElementById('voice-status');
+        const loadingOverlay = document.getElementById('loading-overlay');
 
         function setVoiceState(newState) {
             // Enhanced state transition logging (Fix #3)
@@ -322,6 +359,7 @@
             hideAuthModal();
             document.querySelector('.chat-container').style.display = 'flex';
             userInfo.textContent = username;
+            showLoading(true); // Show loading until scaffold_ready arrives
         }
         function handleLogin() {
             const email = document.getElementById('login-email').value;
@@ -698,7 +736,11 @@
                 }
 
                 if (msg.type === 'status') {
-                    if (msg.status === 'transcription_complete') {
+                    if (msg.status === 'scaffold_warming') {
+                        showLoading(true);
+                    } else if (msg.status === 'scaffold_ready') {
+                        showLoading(false);
+                    } else if (msg.status === 'transcription_complete') {
                         updateLastMessage(msg.transcript);
                     } else if (msg.status === 'llm_tts_streaming') {
                         setVoiceState(VoiceState.AI_SPEAKING);
@@ -759,6 +801,9 @@
                     setTimeout(() => {
                         voiceStatus.style.display = 'none';
                     }, 3000);
+                    if (msg.message === 'scaffold_warm_failed') {
+                        showLoading(false);
+                    }
                 }
                 else if (msg.type === 'speech_interrupted' || msg.type === 'interruption_result') {
                     console.log('Backend confirmed interruption.');
@@ -830,6 +875,10 @@
                 const isPermanent = msg.hasAttribute('data-permanent') ? '(PERMANENT)' : '';
                 console.log(`  ${index}: ${type} ${isTemp}${isPermanent} - "${content}"`);
             });
+        }
+
+        function showLoading(show=true) {
+            loadingOverlay.style.display = show ? 'flex' : 'none';
         }
     </script>
 </body>

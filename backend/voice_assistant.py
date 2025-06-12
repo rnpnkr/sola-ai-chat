@@ -118,8 +118,37 @@ class VoiceAssistantWebSocket:
         self.empty_response_count = {}
         self.max_empty_responses = 3
 
-    async def _cleanup_client_session(self, client_id: str):
-        """Safely cleans up all resources associated with a client's streaming session."""
+    # ------------------------------------------------------------------
+    # 🔥 Proactive scaffold warming (called right after WS auth)
+    # ------------------------------------------------------------------
+
+    async def _warm_intimacy_scaffold(self, client_id: str, user_id: str):
+        """Proactively build the intimacy scaffold cache so the first user
+        utterance is fast. Runs asynchronously – does not block the handshake.
+
+        Sends optional status messages to the frontend so the UI can show a
+        loading indicator while the scaffold is prepared.
+        """
+        try:
+            await manager.send_status(client_id, "scaffold_warming")
+            scaffold_manager = ServiceRegistry.get_scaffold_manager()
+            await scaffold_manager.get_intimacy_scaffold(user_id)
+            await manager.send_status(client_id, "scaffold_ready")
+            logger.info(f"[{client_id}] Intimacy scaffold warmed for {user_id}")
+        except Exception as werr:
+            logger.error(f"Failed to warm scaffold for {user_id}: {werr}")
+            await manager.send_error(client_id, "scaffold_warm_failed")
+
+    async def _cleanup_client_session(self, client_id: str, *, clear_scaffold_cache: bool = False):
+        """Safely cleans up all resources associated with a client's streaming session.
+
+        Args:
+            client_id: Web-socket client identifier.
+            clear_scaffold_cache: If True, also clear the intimacy_scaffold cache for the
+                associated user. This should only be set on a full WebSocket disconnect –
+                NOT on every utterance. Keeping the cache hot between recordings avoids
+                re-building the scaffold each turn and drastically cuts latency.
+        """
         logger.info(f"[{client_id}] Cleaning up client session...")
         
         # Stop any active TTS session
@@ -150,12 +179,13 @@ class VoiceAssistantWebSocket:
         self.transcription_completed_sent.pop(client_id, None)
         self.empty_response_count.pop(client_id, None)
         
-        # Clear intimacy scaffold cache for this user to guarantee isolation
-        try:
-            from services.service_registry import ServiceRegistry
-            ServiceRegistry.get_scaffold_manager().clear_cache(client_id)
-        except Exception as cerr:
-            logger.warning("Cache cleanup failed for %s: %s", client_id, cerr)
+        # Optionally clear intimacy scaffold cache (only on full disconnect)
+        if clear_scaffold_cache:
+            try:
+                from services.service_registry import ServiceRegistry
+                ServiceRegistry.get_scaffold_manager().clear_cache(client_id)
+            except Exception as cerr:
+                logger.warning("Cache cleanup failed for %s: %s", client_id, cerr)
         
         logger.info(f"[{client_id}] Client session cleanup complete.")
 
@@ -173,11 +203,11 @@ class VoiceAssistantWebSocket:
             logger.error(f"Audio conversion error: {e}")
             return webm_data
 
-    async def start_audio_streaming(self, client_id: str, config: dict):
+    async def start_audio_streaming(self, client_id: str, config: dict, *, user_id: Optional[str] = None):
         """Initialize streaming STT service for client."""
         try:
-            # --- FIX: Ensure any previous session is fully cleaned up ---
-            await self._cleanup_client_session(client_id)
+            # --- FIX: Ensure any previous session is fully cleaned up (keep cache) ---
+            await self._cleanup_client_session(client_id, clear_scaffold_cache=False)
             
             self.transcription_completed_sent[client_id] = False # Reset flag for new session
 
@@ -239,6 +269,19 @@ class VoiceAssistantWebSocket:
             }
             await manager.send_status(client_id, "stream_started")
             logger.info(f"[{client_id}] Streaming STT service started successfully")
+
+            # ------------------------------------------------------------------
+            # 🔥 Warm intimacy scaffold cache EARLY so later calls are instant
+            # ------------------------------------------------------------------
+            if user_id:
+                try:
+                    scaffold_manager = ServiceRegistry.get_scaffold_manager()
+                    # Fire-and-forget – we do not await; just start building cache.
+                    asyncio.create_task(scaffold_manager.get_intimacy_scaffold(user_id))
+                    logger.debug(f"[{client_id}] Triggered scaffold cache warm-up for {user_id}")
+                except Exception as werr:
+                    logger.warning("Failed to warm scaffold cache for %s: %s", user_id, werr)
+
         except Exception as e:
             logger.error(f"Failed to start streaming for {client_id}: {e}")
             await manager.send_error(client_id, f"Streaming initialization failed: {str(e)}")
@@ -341,7 +384,7 @@ class VoiceAssistantWebSocket:
         
         finally:
             # 7. CRITICAL: Always clean up the session afterward.
-            await self._cleanup_client_session(client_id)
+            await self._cleanup_client_session(client_id, clear_scaffold_cache=False)
 
     async def process_audio_stream(self, client_id: str, audio_data: bytes):
         """Process audio with real-time status updates"""
@@ -478,7 +521,7 @@ class VoiceAssistantWebSocket:
             interrupted = False
         finally:
             # --- FIX: Ensure full cleanup after an interruption attempt ---
-            await self._cleanup_client_session(client_id)
+            await self._cleanup_client_session(client_id, clear_scaffold_cache=False)
         return interrupted
 
     async def process_audio_with_langgraph(self, client_id: str, audio_data: bytes, transcript: str = "", user_id: str = None):
@@ -652,6 +695,11 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str, token: Option
         except Exception as e:
             logger.error(f"Auth error for client {client_id}: {e}")
 
+    # ------------------------------------------------------------------
+    # 🔥 Kick off scaffold warming now (fire-and-forget)
+    # ------------------------------------------------------------------
+    asyncio.create_task(assistant._warm_intimacy_scaffold(client_id, user_id))
+
     try:
         while True:
             # Receive message from client
@@ -667,7 +715,7 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str, token: Option
 
             elif message_type == "audio_stream_start":
                 # This is now the primary entry point for starting a recording session
-                await assistant.start_audio_streaming(client_id, message.get("config", {}))
+                await assistant.start_audio_streaming(client_id, message.get("config", {}), user_id=user_id)
 
             elif message_type == "audio_chunk":
                 # Forward audio chunk to streaming service
@@ -757,16 +805,21 @@ async def get_graph_png():
 async def get_chat_page():
     return FileResponse("chat.html")
 
+# ---------------------------------------------------------------------------
+# Connection teardown helpers
+# ---------------------------------------------------------------------------
+
 def handle_client_disconnect(client_id: str):
-    """Clean up when client disconnects"""
+    """Clean up when client disconnects (full WebSocket close)."""
     manager.disconnect(client_id)
-    # Use the robust cleanup function
-    asyncio.create_task(assistant._cleanup_client_session(client_id))
+    # Robust cleanup + clear intimacy scaffold cache (full disconnect)
+    asyncio.create_task(assistant._cleanup_client_session(client_id, clear_scaffold_cache=True))
     try:
         background_service_manager.stop_user_processing(client_id)
         logger.info(f"Stopped background processing for disconnected client {client_id}")
     except Exception as e:
         logger.error(f"Error stopping background processing for {client_id}: {e}")
+    
     assistant.last_processed_transcript.pop(client_id, None)
 
 async def _cleanup_user_memory_operations(client_id: str):

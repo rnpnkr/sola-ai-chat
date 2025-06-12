@@ -18,6 +18,7 @@ from datetime import datetime
 from services.elevenlabs_websocket_service import ElevenLabsWebSocketService
 from services.streaming_text_buffer import StreamingTextBuffer
 from services.service_registry import ServiceRegistry
+from contextlib import contextmanager
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,20 @@ from subconscious.anticipatory_engine import AnticippatoryIntimacyEngine
 # NEW: Initialize intimacy services
 intimacy_scaffold_manager = ServiceRegistry.get_scaffold_manager()
 anticipatory_engine = AnticippatoryIntimacyEngine(mem0_service, intimacy_scaffold_manager)
+
+# ---------------------------------------------------------------------------
+# Utility: simple timing context manager for granular latency logging
+# ---------------------------------------------------------------------------
+
+@contextmanager
+def time_section(section: str, client_id: str):
+    """Log the execution time (in ms) of a code section identified by *section*."""
+    start_ts = time.perf_counter()
+    try:
+        yield
+    finally:
+        elapsed_ms = int((time.perf_counter() - start_ts) * 1000)
+        logger.info(f"[{client_id}] ⏱️ {section} took {elapsed_ms} ms")
 
 # --- Node implementations ---
 
@@ -137,16 +152,21 @@ async def llm_tts_streaming_node(state: ConversationState, config=None):
         text_buffer = StreamingTextBuffer(min_chunk_size=15, max_chunk_size=100)
         # --- Store TTS session in global assistant instance for interruption support ---
         assistant.active_tts_sessions[client_id] = elevenlabs_ws
-        # Prepare context (same as before)
-        intimate_context = await memory_context_builder.build_intimate_context(
-            current_message=state["transcript"],
-            user_id=user_id
-        )
-        intimacy_scaffold = await intimacy_scaffold_manager.get_intimacy_scaffold(user_id)
-        response_guidance = await anticipatory_engine.generate_response_guidance(
-            user_id=user_id,
-            current_message=state["transcript"]
-        )
+        # Prepare context – now with granular latency tracking
+        with time_section("build_intimate_context", client_id):
+            intimate_context = await memory_context_builder.build_intimate_context(
+                current_message=state["transcript"],
+                user_id=user_id
+            )
+
+        with time_section("get_intimacy_scaffold", client_id):
+            intimacy_scaffold = await intimacy_scaffold_manager.get_intimacy_scaffold(user_id)
+
+        with time_section("anticipatory_engine_response_guidance", client_id):
+            response_guidance = await anticipatory_engine.generate_response_guidance(
+                user_id=user_id,
+                current_message=state["transcript"]
+            )
         # Build prompt (same as before)
         subconscious_prompt = f"""{personality_agent.system_prompt}
 
