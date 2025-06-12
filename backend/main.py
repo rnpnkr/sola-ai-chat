@@ -14,7 +14,8 @@ import signal
 from backend.conversational_api.elevenlabs_service import create_conversation_components, ConversationStateManager, Conversation # Import Conversation
 from memory.mem0_async_service import IntimateMemoryService
 from backend.subconscious.background_processor import PersistentSubconsciousProcessor
-
+from services.rag_service import rag_service
+import logging
 app = FastAPI()
 
 # Add CORS middleware
@@ -26,6 +27,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+logging.basicConfig(
+    level=logging.INFO,  # Or DEBUG for more verbosity
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+
+logger = logging.getLogger(__name__)
 # Global variables for ElevenLabs components and state
 elevenlabs_client = None
 state_manager: ConversationStateManager = None
@@ -43,6 +50,7 @@ def _import_memory_health_monitor():
 # Initialize components on startup
 @app.on_event("startup")
 async def startup_event():
+    logger.info("startup event")
     global elevenlabs_client, state_manager, conversation_instance, mem0_service, subconscious_processor
     # Get the running asyncio event loop
     loop = asyncio.get_event_loop()
@@ -57,7 +65,8 @@ async def startup_event():
     memory_health_monitor = _import_memory_health_monitor()
     await memory_health_monitor.start_monitoring()
     print("Memory health monitoring initialized")
-
+    logger.info("initializing rag")
+    await initialize_system()
 # Function to run the ElevenLabs conversation session in a separate thread
 def run_conversation_session(conv: Conversation):
     try:
@@ -71,6 +80,15 @@ def run_conversation_session(conv: Conversation):
     except Exception as e:
         print(f"Exception in conversation session thread: {e}")
         # Handle exceptions, e.g., set state to indicate error
+async def initialize_system():
+    # Initialize RAG with therapeutic documents
+        therapeutic_docs = [
+            "https://www.unk.com/blog/3-loneliness-busting-cbt-techniques-for-social-anxiety/",
+            # Add other therapeutic documents
+        ]
+        await rag_service.initialize_documents(therapeutic_docs)
+        print("rag initalized")
+        logger.info("🚀 Therapeutic RAG system initialized")
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):

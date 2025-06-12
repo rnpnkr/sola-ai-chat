@@ -13,6 +13,7 @@ import io
 from PIL import Image, ImageDraw
 from services.chat_service import chat_service
 from datetime import datetime
+
 from shared_state import active_conversations  # NEW IMPORT
 
 # Import your existing services
@@ -25,6 +26,7 @@ from services.deepgram_streaming_service import DeepgramStreamingService
 from services.background_service_manager import background_service_manager
 from subconscious.intimacy_scaffold import intimacy_scaffold_manager
 from services.memory_coordinator import get_memory_coordinator
+
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -70,6 +72,8 @@ class ConnectionManager:
 
     async def send_result(self, client_id: str, result: dict):
         await self.send_message(client_id, {"type": "result", **result})
+
+
 
 
 manager = ConnectionManager()
@@ -602,6 +606,15 @@ class VoiceAssistantWebSocket:
 
 assistant = VoiceAssistantWebSocket()
 
+async def initialize_system():
+    # Initialize RAG with therapeutic documents
+        therapeutic_docs = [
+            "https://www.unk.com/blog/3-loneliness-busting-cbt-techniques-for-social-anxiety/",
+            # Add other therapeutic documents
+        ]
+        await rag_service.initialize_documents(therapeutic_docs)
+        print("rag initalized")
+        logger.info("🚀 Therapeutic RAG system initialized")
 
 @app.websocket("/ws/{client_id}")
 async def websocket_endpoint(websocket: WebSocket, client_id: str, token: Optional[str] = Query(None)):
@@ -698,6 +711,7 @@ async def health_check():
 @app.get("/")
 async def get_homepage():
     # Serve the new index.html instead of HTML string
+    ##await initialize_system()
     return FileResponse("index.html")
 
 @app.get("/graph")

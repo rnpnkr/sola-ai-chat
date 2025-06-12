@@ -32,6 +32,7 @@ class ConversationState(TypedDict):
     personality_type: str
     client_id: str
     user_id: str
+    #
 
 # --- Service instantiation ---
 # elevenlabs_streaming_service = ElevenLabsStreamingService()
