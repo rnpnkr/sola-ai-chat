@@ -137,4 +137,86 @@ class GraphRelationshipBuilder:
                 from_emotion=from_emotion,
                 to_emotion=to_emotion,
                 catalyst=catalyst_event[:200],
-            ) 
+            )
+
+    # -----------------------------------------------------------------
+    # Migration & validation helpers (Phase-4)
+    # -----------------------------------------------------------------
+
+    @classmethod
+    def migrate_missing_relationships(cls):
+        """Populate any FEELS / TRIGGERED_BY relationships that are missing.
+
+        This migration is *idempotent* – it uses MERGE so running multiple
+        times is safe.  It attempts to back-fill basic emotional data for all
+        users by scanning existing Emotion and Event nodes.
+        """
+
+        try:
+            uri = NEO4J_CONFIG.get("uri")
+            if not uri:
+                logger.warning("Neo4j URI missing – skip relationship migration")
+                return
+
+            driver = GraphDatabase.driver(
+                uri,
+                auth=basic_auth(
+                    NEO4J_CONFIG.get("username"), NEO4J_CONFIG.get("password")
+                ),
+            )
+
+            db = NEO4J_CONFIG.get("database", "neo4j")
+
+            with driver.session(database=db) as session:
+                # FEELS: ensure each (User, Emotion) pair has at least one FEELS edge
+                session.run(
+                    f"""
+                    MATCH (u:{gs.USER_LABEL})-[:{gs.REL_FEELS}]-(e:{gs.EMOTION_LABEL})
+                    RETURN COUNT(*) AS dummy
+                    """
+                )
+
+                session.run(
+                    f"""
+                    MATCH (u:{gs.USER_LABEL})<-[:{gs.REL_TRIGGERED_BY}]-(e:{gs.EMOTION_LABEL})
+                    RETURN COUNT(*) AS dummy
+                    """
+                )
+
+                # Create missing FEELS
+                session.run(
+                    f"""
+                    MATCH (u:{gs.USER_LABEL}), (e:{gs.EMOTION_LABEL})
+                    WHERE e.user_id = u.user_id
+                    MERGE (u)-[r:{gs.REL_FEELS}]->(e)
+                    ON CREATE SET r.created_at = timestamp()
+                    """
+                )
+
+                # Create missing TRIGGERED_BY relationships if Event exists
+                session.run(
+                    f"""
+                    MATCH (e:{gs.EMOTION_LABEL})
+                    OPTIONAL MATCH (ev:{gs.EVENT_LABEL} {{user_id: e.user_id}})
+                    WHERE ev IS NOT NULL
+                    MERGE (e)-[r:{gs.REL_TRIGGERED_BY}]->(ev)
+                    ON CREATE SET r.created_at = timestamp()
+                    """
+                )
+
+            logger.info("✅ Graph relationship migration completed.")
+        except Exception as exc:
+            logger.error("Graph migration failed: %s", exc, exc_info=True)
+
+    # -----------------------------------------------------------------
+    @staticmethod
+    def validate_relationship_exists(session, rel_type: str) -> bool:
+        """Return True if `rel_type` exists in DB schema."""
+        try:
+            result = session.run(
+                "CALL db.relationshipTypes() YIELD relationshipType RETURN relationshipType AS rel"
+            )
+            types = {rec["rel"] for rec in result}
+            return rel_type in types
+        except Exception:
+            return False 

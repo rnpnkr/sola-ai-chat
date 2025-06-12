@@ -11,15 +11,13 @@ import logging
 from services.deepgram_streaming_service import DeepgramStreamingService
 import uuid
 import wave, contextlib, io, struct
-from memory.mem0_async_service import IntimateMemoryService
 from memory.memory_context_builder import MemoryContextBuilder
 from memory.conversation_memory_manager import ConversationMemoryManager
-from subconscious.intimacy_scaffold import IntimacyScaffoldManager
-from subconscious.anticipatory_engine import AnticippatoryIntimacyEngine
 from services.background_service_manager import background_service_manager
 from datetime import datetime
 from services.elevenlabs_websocket_service import ElevenLabsWebSocketService
 from services.streaming_text_buffer import StreamingTextBuffer
+from services.service_registry import ServiceRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -37,12 +35,15 @@ class ConversationState(TypedDict):
 # --- Service instantiation ---
 # elevenlabs_streaming_service = ElevenLabsStreamingService()
 
-# Initialize memory services
-mem0_service = IntimateMemoryService()
+# Initialize memory services via registry (singleton)
+mem0_service = ServiceRegistry.get_memory_service()
 memory_context_builder = MemoryContextBuilder(mem0_service)
 
+# Use shared scaffold manager via registry
+from subconscious.anticipatory_engine import AnticippatoryIntimacyEngine
+
 # NEW: Initialize intimacy services
-intimacy_scaffold_manager = IntimacyScaffoldManager(mem0_service)
+intimacy_scaffold_manager = ServiceRegistry.get_scaffold_manager()
 anticipatory_engine = AnticippatoryIntimacyEngine(mem0_service, intimacy_scaffold_manager)
 
 # --- Node implementations ---

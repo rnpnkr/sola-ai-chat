@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+# pylint: disable=attribute-defined-outside-init
 import time
 import logging
-from typing import List, Dict
+from typing import List, Dict, ClassVar, Optional
+from threading import Lock
 
 from neo4j import GraphDatabase, basic_auth
 
@@ -15,25 +17,48 @@ logger = logging.getLogger(__name__)
 
 
 class GraphQueryService:
-    """Lightweight wrapper around Neo4j for common relationship queries."""
+    """Process-wide singleton wrapper around Neo4j read queries.
+
+    Provides lightweight helpers for common emotional-relationship look-ups and
+    maintains its own 60-second per-user cache.  All instances share a single
+    underlying :pyclass:`neo4j.Driver` to avoid connection flood.
+    """
+
+    _instance: ClassVar["GraphQueryService | None"] = None
+    _driver: ClassVar[Optional[object]] = None  # neo4j.Driver but avoids import in signature
+    _init_lock: ClassVar[Lock] = Lock()
+
+    def __new__(cls, *args, **kwargs):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
 
     def __init__(self):
-        uri = NEO4J_CONFIG.get("uri")
-        if not uri:
-            raise RuntimeError("Neo4j URI not configured; graph queries unavailable.")
+        # Guard against re-running init for subsequent instantiation attempts
+        if getattr(self, "_initialized", False):
+            return
 
-        self._driver = GraphDatabase.driver(
-            uri,
-            auth=basic_auth(NEO4J_CONFIG.get("username"), NEO4J_CONFIG.get("password")),
-        )
-        self.database = NEO4J_CONFIG.get("database", "neo4j")
+        self._initialized = True
 
-        # Ensure constraints exist once
-        gs.ensure_constraints()
+        # ------------------------------------------------------------------
+        # Instance attributes
+        # ------------------------------------------------------------------
 
-        # Cache: {user_id: (timestamp, List[str])}
-        self._recent_emotion_cache: Dict[str, tuple] = {}
+        # Per-user cache that stores a tuple of (timestamp, cached_lines).
+        # Keeps the most recent emotional-context query for a short period to
+        # prevent hammering Neo4j when building context for the same user.
+        self._recent_emotion_cache: Dict[str, tuple[float, List[str]]] = {}
+
+        # Cache TTL — keep cached results for this many seconds before
+        # considering them stale. 60 s is enough for multiple requests during a
+        # single assistant turn while still keeping data fresh.
         self.cache_ttl_seconds: int = 60
+
+        # Name of the Neo4j database to target. Falls back to the driver's
+        # default (usually "neo4j") if not configured.
+        self.database: Optional[str] = NEO4J_CONFIG.get("database") or None
+
+        # Driver initialisation is deferred and thread-safe via _ensure_driver().
 
     # ------------------------------------------------------------------
     # Public helpers
@@ -54,7 +79,12 @@ class GraphQueryService:
             "RETURN e.name AS emotion, ev.summary AS cause"
         )
 
-        with self._driver.session(database=self.database) as session:
+        driver = self._ensure_driver()
+        if driver is None:
+            logger.warning("Graph driver unavailable; returning empty emotional context.")
+            return []
+
+        with driver.session(database=self.database) as session:
             records = session.run(query, uid=user_id, lim=limit)
             lines = [
                 f"{rec['emotion']} (triggered by: {rec.get('cause') or 'unknown'})"
@@ -66,12 +96,42 @@ class GraphQueryService:
         return lines
 
     # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def _ensure_driver(cls):
+        """Thread-safe lazy initialisation of the shared Neo4j driver."""
+        if cls._driver is None:
+            with cls._init_lock:
+                if cls._driver is None:
+                    uri = NEO4J_CONFIG.get("uri")
+                    if not uri:
+                        logger.warning("NEO4J uri missing – graph features disabled.")
+                        return None
+                    cls._driver = GraphDatabase.driver(
+                        uri,
+                        auth=basic_auth(
+                            NEO4J_CONFIG.get("username"),
+                            NEO4J_CONFIG.get("password"),
+                        ),
+                    )
+        return cls._driver
+
+    # ------------------------------------------------------------------
+    # Lifecycle helpers
+    # ------------------------------------------------------------------
 
     def close(self):
-        try:
-            self._driver.close()
-        except Exception:
-            pass
+        """Close the shared Neo4j driver. Safe to call multiple times."""
+        drv = self.__class__._driver
+        if drv:
+            try:
+                drv.close()
+            except Exception:
+                pass
+            finally:
+                self.__class__._driver = None
 
     # ---- Stubs for future complex queries --------------------------------
 

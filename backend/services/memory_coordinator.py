@@ -3,7 +3,7 @@ from typing import Dict, List, Optional, Set
 import logging
 from datetime import datetime
 from collections import defaultdict
-from memory.mem0_async_service import IntimateMemoryService
+from services.service_registry import ServiceRegistry
 from services.memory_context_enhancer import MemoryContextEnhancer
 from services.chat_service import chat_service
 import time
@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 class MemoryCoordinator:
     """Coordinates memory operations to prevent duplicates and optimize batching"""
-    def __init__(self, mem0_service: IntimateMemoryService):
+    def __init__(self, mem0_service):
         self.mem0_service = mem0_service
         self.memory_enhancer = MemoryContextEnhancer()
         self.pending_operations = defaultdict(list)  # user_id -> list of operations
@@ -428,6 +428,6 @@ def get_memory_coordinator() -> MemoryCoordinator:
     """Get global memory coordinator instance"""
     global memory_coordinator
     if memory_coordinator is None:
-        mem0_service = IntimateMemoryService()
+        mem0_service = ServiceRegistry.get_memory_service()
         memory_coordinator = MemoryCoordinator(mem0_service)
     return memory_coordinator 
