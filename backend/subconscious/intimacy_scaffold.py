@@ -5,7 +5,7 @@ import logging
 from memory.mem0_async_service import IntimateMemoryService
 import asyncio
 from services.memory_coordinator import get_memory_coordinator
-from .graph_query_service import GraphQueryService
+from services.service_registry import ServiceRegistry  # localized import to avoid cycles
 
 logger = logging.getLogger(__name__)
 
@@ -36,26 +36,36 @@ class IntimacyScaffoldManager:
     
     def __init__(self, mem0_service: IntimateMemoryService):
         self.mem0_service = mem0_service
-        self.graph_query_service = GraphQueryService()
+        self.graph_query_service = ServiceRegistry.get_graph_service()
         self.scaffold_cache = {}  # In-memory cache for <150ms access
         self.cache_ttl = 300  # 5 minutes cache TTL
         self.pending_storage_tasks = {}  # Track async storage tasks
         self.session_changes = {}  # Track changes per session for batch storage
+        self.user_locks: Dict[str, asyncio.Lock] = {}
         
+    async def _get_user_lock(self, user_id: str) -> asyncio.Lock:
+        """Return an asyncio.Lock unique to the user (created lazily)."""
+        if user_id not in self.user_locks:
+            self.user_locks[user_id] = asyncio.Lock()
+        return self.user_locks[user_id]
+    
     async def get_intimacy_scaffold(self, user_id: str) -> IntimacyScaffold:
         """Retrieve current relationship scaffold with <150ms guarantee"""
         try:
-            # Check local cache first (<10ms access)
-            if self._is_cached_fresh(user_id):
-                logger.debug(f"Cache hit for user {user_id}")
-                return self.scaffold_cache[user_id]["scaffold"]
+            lock = await self._get_user_lock(user_id)
+            async with lock:
+                # Check local cache first (<10ms access)
+                if self._is_cached_fresh(user_id):
+                    logger.debug(f"Cache hit for user {user_id}")
+                    return self.scaffold_cache[user_id]["scaffold"]
             
             # Build from Mem0 data (~100-150ms)
             logger.debug(f"Cache miss for user {user_id}, building from Mem0")
             scaffold = await self._build_scaffold_from_mem0(user_id)
             
             # Cache for future access
-            self._cache_scaffold(user_id, scaffold)
+            async with await self._get_user_lock(user_id):
+                self._cache_scaffold(user_id, scaffold)
             
             return scaffold
             
@@ -66,12 +76,14 @@ class IntimacyScaffoldManager:
     async def update_scaffold_cache(self, user_id: str, new_insights: Dict):
         """Update cached scaffold with new background insights"""
         try:
-            if user_id in self.scaffold_cache:
-                # Update existing scaffold with new insights
-                scaffold = self.scaffold_cache[user_id]["scaffold"]
-                scaffold = self._merge_insights_into_scaffold(scaffold, new_insights)
-                self._cache_scaffold(user_id, scaffold)
-                logger.debug(f"Updated cached scaffold for user {user_id}")
+            lock = await self._get_user_lock(user_id)
+            async with lock:
+                if user_id in self.scaffold_cache:
+                    # Update existing scaffold with new insights
+                    scaffold = self.scaffold_cache[user_id]["scaffold"]
+                    scaffold = self._merge_insights_into_scaffold(scaffold, new_insights)
+                    self._cache_scaffold(user_id, scaffold)
+                    logger.debug(f"Updated cached scaffold for user {user_id}")
         except Exception as e:
             logger.error(f"Error updating scaffold cache for {user_id}: {e}")
     
@@ -341,8 +353,10 @@ class IntimacyScaffoldManager:
         """Clear scaffold cache for user or all users"""
         if user_id:
             self.scaffold_cache.pop(user_id, None)
+            self.user_locks.pop(user_id, None)
         else:
             self.scaffold_cache.clear()
+            self.user_locks.clear()
     
     def get_cache_stats(self) -> Dict:
         """Get cache statistics for monitoring"""
@@ -526,5 +540,5 @@ class IntimacyScaffoldManager:
         except Exception as e:
             logger.error(f"Scaffold backup failed for {user_id}: {e}")
 
-# Export a singleton instance for global use
-intimacy_scaffold_manager = IntimacyScaffoldManager(IntimateMemoryService()) 
+# Export a singleton instance for global use via ServiceRegistry
+intimacy_scaffold_manager = ServiceRegistry.get_scaffold_manager() 

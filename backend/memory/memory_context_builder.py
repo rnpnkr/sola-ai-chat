@@ -4,18 +4,15 @@ import hashlib
 from .mem0_async_service import IntimateMemoryService
 import logging
 
-# Graph query integration
-try:
-    from subconscious.graph_query_service import GraphQueryService
-except ImportError:
-    GraphQueryService = None  # Graph not available
+# Graph query integration via ServiceRegistry to guarantee pooling
+from services.service_registry import ServiceRegistry
 
 logger = logging.getLogger(__name__)
 
 class MemoryContextBuilder:
     def __init__(self, mem0_service: IntimateMemoryService):
         self.mem0_service = mem0_service
-        self.graph_query_service = GraphQueryService() if GraphQueryService else None
+        self.graph_query_service = ServiceRegistry.get_graph_service()
         # 🎯 NEW: simple in-memory cache to avoid redundant searches during an active conversation
         self.search_cache: Dict[str, Dict] = {}
         self.cache_ttl: int = 30  # seconds

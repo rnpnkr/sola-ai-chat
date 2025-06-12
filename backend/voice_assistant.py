@@ -23,8 +23,8 @@ from agents.langgraph_orchestrator import langgraph_pipeline
 from agents.personality_agent import PersonalityAgent, neo_config
 from services.deepgram_streaming_service import DeepgramStreamingService
 from services.background_service_manager import background_service_manager
-from subconscious.intimacy_scaffold import intimacy_scaffold_manager
 from services.memory_coordinator import get_memory_coordinator
+from services.service_registry import ServiceRegistry
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -32,7 +32,31 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="WebSocket Voice Assistant")
 
+# ---------------------------------------------------------------------------
+# Application lifecycle events
+# ---------------------------------------------------------------------------
+
+@app.on_event("startup")
+async def _initialize_core_services() -> None:
+    """Eagerly initialise heavy singletons (Mem0, Neo4j, etc.)."""
+    await ServiceRegistry.initialize_all()
+    # Expose registry via app.state so it can be accessed in route deps if
+    # desired (e.g., `request.app.state.registry`).
+    app.state.registry = ServiceRegistry  # type: ignore[attr-defined]
+
 app.mount("/static", StaticFiles(directory="."), name="static")
+
+# ---------------------------------------------------------------------------
+# Shutdown event – ensure pooled resources close gracefully
+# ---------------------------------------------------------------------------
+
+@app.on_event("shutdown")
+async def _shutdown_core_services() -> None:
+    from services.service_registry import ServiceRegistry
+    try:
+        await ServiceRegistry.cleanup_all()
+    except Exception as cerr:
+        logger.warning("Service cleanup encountered errors: %s", cerr)
 
 class ConnectionManager:
     def __init__(self):
@@ -125,6 +149,13 @@ class VoiceAssistantWebSocket:
         self.last_processed_transcript.pop(client_id, None)
         self.transcription_completed_sent.pop(client_id, None)
         self.empty_response_count.pop(client_id, None)
+        
+        # Clear intimacy scaffold cache for this user to guarantee isolation
+        try:
+            from services.service_registry import ServiceRegistry
+            ServiceRegistry.get_scaffold_manager().clear_cache(client_id)
+        except Exception as cerr:
+            logger.warning("Cache cleanup failed for %s: %s", client_id, cerr)
         
         logger.info(f"[{client_id}] Client session cleanup complete.")
 
@@ -750,7 +781,7 @@ async def _cleanup_user_memory_operations(client_id: str):
 async def _store_session_completion(client_id: str):
     """Store session completion data"""
     try:
-        await intimacy_scaffold_manager.store_session_complete(client_id)
+        await ServiceRegistry.get_scaffold_manager().store_session_complete(client_id)
         logger.info(f"Session completion stored for {client_id}")
     except Exception as e:
         logger.error(f"Error storing session completion for {client_id}: {e}")
@@ -777,7 +808,7 @@ async def get_memory_stats():
 async def get_cache_freshness(user_id: str):
     """Get cache freshness information for debugging"""
     try:
-        freshness_info = intimacy_scaffold_manager.get_cache_freshness_info(user_id)
+        freshness_info = ServiceRegistry.get_scaffold_manager().get_cache_freshness_info(user_id)
         return {
             "status": "success",
             "user_id": user_id,
@@ -889,6 +920,11 @@ async def graph_health_check():
             "hybrid_mode": "vector_only_fallback",
             "error": str(e),
         }
+
+@app.get("/health/background")
+async def background_health():
+    """Return background service manager stats."""
+    return background_service_manager.get_stats()
 
 if __name__ == "__main__":
     import uvicorn

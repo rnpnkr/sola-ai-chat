@@ -1,15 +1,15 @@
 import asyncio
 import logging
 from typing import Set
-from memory.mem0_async_service import IntimateMemoryService
 from subconscious.background_processor import PersistentSubconsciousProcessor
+from services.service_registry import ServiceRegistry
 
 logger = logging.getLogger(__name__)
 
 class BackgroundServiceManager:
     """Global manager for background services that should persist across conversations"""
     def __init__(self):
-        self.mem0_service = IntimateMemoryService()
+        self.mem0_service = ServiceRegistry.get_memory_service()
         self.subconscious_processor = PersistentSubconsciousProcessor(self.mem0_service)
         self.active_users: Set[str] = set()
         self._shutdown_event = asyncio.Event()
@@ -65,6 +65,13 @@ class BackgroundServiceManager:
                 await asyncio.sleep(0.5)  # Small delay for coordination
         except Exception as e:
             logger.error(f"Error coordinating processing for {user_id}: {e}")
+
+    # ---------------------- Health reporting --------------------------
+    def get_stats(self) -> dict:
+        """Return simple stats for health endpoint."""
+        return {
+            "active_users": len(self.active_users),
+        }
 
 # Global instance
 background_service_manager = BackgroundServiceManager() 

@@ -1,6 +1,6 @@
 import os
 import asyncio
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, ClassVar
 import logging
 from urllib.parse import urlparse
 from mem0 import AsyncMemory
@@ -10,13 +10,36 @@ from config import NEO4J_CONFIG
 logger = logging.getLogger(__name__)
 
 class IntimateMemoryService:
-    def __init__(self):
-        """
-        Initialize config but defer AsyncMemory initialization to avoid blocking.
-        """
-        self.memory: Optional[AsyncMemory] = None
-        self._initialization_lock = asyncio.Lock()
+    """Singleton wrapper around **Mem0 AsyncMemory**.
 
+    Multiple imports across the code-base can safely instantiate this class; all
+    calls will receive the *same* underlying object.  The heavy
+    ``AsyncMemory`` instance is built **once** per Python process the first time
+    :pymeth:`_ensure_memory_initialized` is awaited.
+    """
+
+    # --- Class-level singletons ------------------------------------------------
+    _instance: ClassVar["IntimateMemoryService | None"] = None
+    _memory_instance: ClassVar[Optional[AsyncMemory]] = None  # Mem0 client
+    _init_lock: ClassVar[asyncio.Lock] = asyncio.Lock()
+
+    # -------------------------------------------------------------------------
+    def __new__(cls, *args, **kwargs):  # noqa: D401 – simple singleton guard
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
+    def __init__(self):
+        # Prevent re-running init on subsequent instantiations
+        if getattr(self, "_initialized", False):
+            return
+
+        self._initialized = True
+
+        # Defer AsyncMemory creation – just build config here
+        # NOTE: Instance attributes access class variables for backwards compat
+        self.memory: Optional[AsyncMemory] = None  # alias to _memory_instance later
+        
         # Parse the connection string to build a component-based config
         connection_string = os.getenv("SUPABASE_CONNECTION_STRING")
         if not connection_string:
@@ -68,17 +91,17 @@ class IntimateMemoryService:
         )
 
     async def _ensure_memory_initialized(self):
-        """
-        Asynchronously initializes the AsyncMemory instance if it hasn't been already.
-        This method is non-blocking and safe to call multiple times.
-        """
-        if self.memory is None:
-            async with self._initialization_lock:
-                # Double-check after acquiring the lock
-                if self.memory is None:
-                    logger.info("Initializing AsyncMemory instance with component-based config...")
-                    self.memory = AsyncMemory(config=self.config)
-                    logger.info("✅ AsyncMemory initialized.")
+        """Thread-safe lazy construction of :pyclass:`mem0.AsyncMemory`."""
+
+        if self.__class__._memory_instance is None:
+            async with self.__class__._init_lock:
+                if self.__class__._memory_instance is None:
+                    logger.info("Initializing AsyncMemory singleton with component-based config …")
+                    self.__class__._memory_instance = AsyncMemory(config=self.config)
+                    logger.info("✅ AsyncMemory singleton initialised.")
+
+        # Keep instance attribute in sync for legacy callers
+        self.memory = self.__class__._memory_instance
 
     async def search_intimate_memories(self, query: str, user_id: str, limit: int = 5) -> Dict:
         """Search for emotionally relevant memories"""
@@ -116,7 +139,11 @@ class IntimateMemoryService:
         await self._ensure_memory_initialized()
         try:
             logger.info(f"Storing conversation memory for {user_id}...")
-            result = await self.memory.add(messages, user_id=user_id, metadata=metadata)
+            result = await self.memory.add(
+                messages,
+                user_id=user_id,
+                metadata=metadata
+            )
             logger.info(f"Successfully stored conversation memory for {user_id}: {result}")
             return {"status": "success", "result": result}
         except Exception as e:
