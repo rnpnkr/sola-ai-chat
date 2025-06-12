@@ -76,27 +76,25 @@ def ensure_constraints() -> None:
     try:
         drv = _driver()
         with drv.session(database=NEO4J_CONFIG.get("database", "neo4j")) as session:
-            # User uniqueness constraint
+            # -------------------------------------------------------------
+            # ⚡ MINIMAL INDEXES ONLY – enable organic graph development
+            # -------------------------------------------------------------
+            # We intentionally keep constraints light to allow Mem0 to
+            # create any node/relationship types it deems useful for the
+            # evolving relationship graph.
+
+            # Global index to accelerate per-user queries across all labels
             session.run(
-                "CREATE CONSTRAINT user_unique IF NOT EXISTS FOR (u:User) REQUIRE u.user_id IS UNIQUE"
+                "CREATE INDEX user_id_global_idx IF NOT EXISTS FOR (n) ON (n.user_id)"
             )
 
-            # Memory uniqueness composite constraint
+            # Basic timestamp index on Memory nodes for chronological look-ups
             session.run(
-                "CREATE CONSTRAINT memory_unique IF NOT EXISTS FOR (m:Memory) REQUIRE (m.memory_id, m.user_id) IS UNIQUE"
+                "CREATE INDEX memory_timestamp_idx IF NOT EXISTS FOR (m:Memory) ON (m.created_at)"
             )
 
-            # 🔧 Individual indexes per label for user_id
-            session.run("CREATE INDEX user_user_id_idx IF NOT EXISTS FOR (u:User) ON (u.user_id)")
-            session.run("CREATE INDEX memory_user_id_idx IF NOT EXISTS FOR (m:Memory) ON (m.user_id)")
-            session.run("CREATE INDEX emotion_user_id_idx IF NOT EXISTS FOR (e:Emotion) ON (e.user_id)")
-            session.run("CREATE INDEX event_user_id_idx IF NOT EXISTS FOR (ev:Event) ON (ev.user_id)")
-
-            # 🎯 Performance indexes for emotional queries
-            session.run("CREATE INDEX emotion_name_idx IF NOT EXISTS FOR (e:Emotion) ON (e.name)")
-            session.run("CREATE INDEX emotion_created_idx IF NOT EXISTS FOR (e:Emotion) ON (e.created_at)")
-            session.run("CREATE INDEX event_summary_idx IF NOT EXISTS FOR (ev:Event) ON (ev.summary)")
-            session.run("CREATE INDEX memory_intimacy_idx IF NOT EXISTS FOR (m:Memory) ON (m.intimacy_level)")
+            # NOTE: All other constraints & indexes have been removed to
+            # facilitate fully organic schema evolution.
 
         _SCHEMA_INITIALISED = True
         logger.info("✅ Graph schema constraints ensured with intimate AI optimizations.")

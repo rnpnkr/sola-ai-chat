@@ -18,7 +18,7 @@ class MemoryContextBuilder:
         self.cache_ttl: int = 30  # seconds
 
     async def build_intimate_context(self, current_message: str, user_id: str) -> str:
-        """Build memory-informed context for intimate responses"""
+        """Build relationship-aware context using organic graph development"""
         try:
             # --- CACHE CHECK --------------------------------------------------
             cache_key = f"{user_id}:{hashlib.md5(current_message.encode()).hexdigest()}"
@@ -27,86 +27,113 @@ class MemoryContextBuilder:
                 logger.info(f"🎯 Using cached memory search for {user_id}")
                 return cache_entry["context"]
 
-            logger.info(f"🔍 Building context for {user_id} with message: '{current_message[:50]}...'")
+            logger.info(f"🔍 Building organic relationship context for {user_id}: '{current_message[:50]}...'")
             
-            # Search for relevant emotional memories (cache miss)
-            memories = await self.mem0_service.search_intimate_memories(
-                query=current_message,
+            # --- ORGANIC RELATIONSHIP ANALYSIS ---
+            # Extract emotional undertone from current message
+            emotion_focus = self._extract_emotional_undertone(current_message)
+            
+            # Search for relationship context (replaces multiple embedding calls)
+            relationship_context = await self.mem0_service.search_relationship_context(
                 user_id=user_id,
+                emotion_focus=emotion_focus,
                 limit=3
             )
             
-            logger.info(f"🔍 Memory search returned {len(memories.get('results', []))} results for {user_id}")
+            # Find emotional patterns if current message has emotional content
+            emotional_patterns = []
+            if emotion_focus:
+                emotional_patterns_result = await self.mem0_service.search_emotional_patterns(
+                    user_id=user_id,
+                    current_emotion=emotion_focus,
+                    limit=2
+                )
+                emotional_patterns = emotional_patterns_result.get("results", [])
             
-            # DEBUG: Log the raw memory structure
-            logger.info(f"🔍 [DEBUG] Raw memories structure: {memories}")
+            # Get trust evolution context for intimate responses
+            trust_context = await self.mem0_service.search_trust_evolution(
+                user_id=user_id,
+                limit=2
+            )
             
-            results = memories.get("results", [])
-            relationship_lines: List[str] = []
-            # Fetch recent emotional context via graph if available
-            if self.graph_query_service:
-                try:
-                    relationship_lines = self.graph_query_service.get_recent_emotional_context(user_id)
-                except Exception as gerr:
-                    logger.warning("Graph query failed for %s: %s", user_id, gerr)
-
-            if results or relationship_lines:
-                formatted_memories = []
-                
-                for i, memory in enumerate(results):
-                    # Handle different memory formats from Mem0
-                    memory_text = ""
-                    
-                    if isinstance(memory, dict):
-                        # If it's a dict, try to get the 'memory' field
-                        memory_text = memory.get('memory', '')
-                        if not memory_text:
-                            # Try other possible fields
-                            memory_text = memory.get('text', '') or memory.get('content', '') or str(memory)
-                    elif isinstance(memory, str):
-                        # If it's already a string
-                        memory_text = memory
-                    else:
-                        # Convert to string as fallback
-                        memory_text = str(memory)
-                    
+            # --- BUILD INTIMATE CONTEXT ---
+            context_lines = []
+            
+            # Relationship memories
+            relationship_results = relationship_context.get("results", [])
+            if relationship_results:
+                context_lines.append("💝 RELATIONSHIP CONTEXT:")
+                for memory in relationship_results:
+                    memory_text = self._extract_memory_text(memory)
                     if memory_text:
-                        logger.info(f"🔍 Memory {i+1}: {memory_text[:100]}...")
-                        formatted_memories.append(f"- {memory_text}")
-                    else:
-                        logger.warning(f"🔍 Memory {i+1}: Empty or invalid content")
-                
-                context_parts = []
-                if formatted_memories:
-                    context_parts.append("IMPORTANT CONTEXT - What you remember about this person:")
-                    context_parts.extend(formatted_memories)
-
-                if relationship_lines:
-                    context_parts.append("\nRECENT EMOTIONAL CONTEXT:")
-                    context_parts.extend([f"- {line}" for line in relationship_lines])
-
-                if context_parts:
-                    context = "\n".join(context_parts)
-                    context += "\n\nUSE THIS INFORMATION to provide personalized, contextually aware responses."
-                else:
-                    context = "This is the beginning of your relationship with this person."
-            else:
-                context = "This is the beginning of your relationship with this person."
-
-            logger.info(f"🔍 Final context for LLM: {context[:200]}...")
-            logger.info(f"✅ Context built successfully for {user_id}")
+                        context_lines.append(f"- {memory_text}")
             
-            # --- STORE IN CACHE ---------------------------------------------
+            # Emotional patterns
+            if emotional_patterns:
+                context_lines.append(f"\n🎭 EMOTIONAL PATTERN ({emotion_focus}):")
+                for pattern in emotional_patterns:
+                    pattern_text = self._extract_memory_text(pattern)
+                    if pattern_text:
+                        context_lines.append(f"- {pattern_text}")
+            
+            # Trust evolution
+            trust_results = trust_context.get("results", [])
+            if trust_results:
+                context_lines.append("\n🌱 TRUST & INTIMACY GROWTH:")
+                for trust_memory in trust_results:
+                    trust_text = self._extract_memory_text(trust_memory)
+                    if trust_text:
+                        context_lines.append(f"- {trust_text}")
+            
+            # Build final context
+            if context_lines:
+                context = "\n".join(context_lines)
+                context += f"\n\nUSE THIS to respond with deep emotional understanding and relationship awareness."
+            else:
+                context = "This is a precious moment to start building a meaningful connection with this person."
+            
+            # --- CACHE RESULT ---
             self.search_cache[cache_key] = {
                 "context": context,
                 "timestamp": time.time()
             }
             
+            logger.info(f"✅ Organic context built for {user_id} - {len(context_lines)} relationship elements")
             return context
             
         except Exception as e:
-            logger.error(f"❌ Context building failed for {user_id}: {e}", exc_info=True)
-            return "This is the beginning of your relationship with this person."
+            logger.error(f"❌ Organic context building failed for {user_id}: {e}", exc_info=True)
+            return "This is a precious moment to connect with this person."
+
+    def _extract_emotional_undertone(self, message: str) -> str:
+        """Extract emotional focus from current message"""
+        message_lower = message.lower()
+        
+        emotion_keywords = {
+            "anxious": ["worried", "anxious", "nervous", "scared", "afraid"],
+            "happy": ["happy", "excited", "great", "wonderful", "amazing", "love"],
+            "sad": ["sad", "depressed", "down", "upset", "hurt"],
+            "grateful": ["grateful", "thankful", "appreciate", "blessed"],
+            "confused": ["confused", "unsure", "don't know", "uncertain"],
+            "lonely": ["lonely", "alone", "isolated", "empty"],
+            "angry": ["angry", "frustrated", "mad", "annoyed"],
+            "vulnerable": ["vulnerable", "personal", "private", "share", "open up"]
+        }
+        
+        for emotion, keywords in emotion_keywords.items():
+            if any(keyword in message_lower for keyword in keywords):
+                return emotion
+        
+        return None
+
+    def _extract_memory_text(self, memory) -> str:
+        """Extract text from various memory formats"""
+        if isinstance(memory, dict):
+            return memory.get('memory', '') or memory.get('text', '') or memory.get('content', '')
+        elif isinstance(memory, str):
+            return memory
+        else:
+            return str(memory) if memory else ""
 
     def _format_intimate_memories(self, memories: Dict) -> str:
         """Format memories for intimate conversation context"""

@@ -52,7 +52,9 @@ async def stt_node(state: ConversationState, config=None):
     Handles Speech-to-Text. Prioritizes streaming transcript but can
     fall back to file-based STT if enabled.
     """
-    fallback_file_stt = False # Set to True to enable file-based fallback
+    fallback_file_stt = False  # Set to True to enable file-based fallback
+    # --- Mark pipeline start time for end-to-end latency measurement ---
+    pipeline_start_ns = time.perf_counter_ns()
     manager = config.get("configurable", {}).get("manager") if config else None
     client_id = state["client_id"]
 
@@ -61,12 +63,20 @@ async def stt_node(state: ConversationState, config=None):
     if transcript:
         logger.info(f"[{client_id}] Using streaming transcript: '{transcript}'. Skipping file-based STT.")
         # DO NOT send 'transcription_complete' here, it's handled by the streaming flow
-        return {"transcript": transcript, "stt_time_ms": 0}
+        return {
+            "transcript": transcript,
+            "stt_time_ms": 0,
+            "pipeline_start_ns": pipeline_start_ns,
+        }
 
     # If no streaming transcript and fallback is disabled, return empty
     if not fallback_file_stt:
         logger.warning(f"[{client_id}] No streaming transcript and file-based STT fallback is disabled. Returning empty transcript.")
-        return {"transcript": "", "stt_time_ms": 0}
+        return {
+            "transcript": "",
+            "stt_time_ms": 0,
+            "pipeline_start_ns": pipeline_start_ns,
+        }
     
     # --- Fallback to File-Based STT (if enabled) ---
     logger.info(f"[{client_id}] No streaming transcript found. Running file-based STT as fallback.")
@@ -110,12 +120,20 @@ async def stt_node(state: ConversationState, config=None):
             os.remove(input_path)
         except:
             pass
-        return {"transcript": transcript or "", "stt_time_ms": stt_time_ms}
+        return {
+            "transcript": transcript or "",
+            "stt_time_ms": stt_time_ms,
+            "pipeline_start_ns": pipeline_start_ns,
+        }
     except Exception as e:
         if manager:
             await manager.send_error(client_id, f"STT failed: {str(e)}")
         logger.error(f"[{client_id}] STT Error: {str(e)}")
-        return {"transcript": "", "stt_time_ms": 0}
+        return {
+            "transcript": "",
+            "stt_time_ms": 0,
+            "pipeline_start_ns": pipeline_start_ns,
+        }
 
 async def llm_tts_streaming_node(state: ConversationState, config=None):
     """
@@ -138,7 +156,7 @@ async def llm_tts_streaming_node(state: ConversationState, config=None):
         # --- Store TTS session in global assistant instance for interruption support ---
         assistant.active_tts_sessions[client_id] = elevenlabs_ws
         # Prepare context (same as before)
-        intimate_context = await memory_context_builder.build_intimate_context(
+        organic_context = await memory_context_builder.build_intimate_context(
             current_message=state["transcript"],
             user_id=user_id
         )
@@ -150,7 +168,7 @@ async def llm_tts_streaming_node(state: ConversationState, config=None):
         # Build prompt (same as before)
         subconscious_prompt = f"""{personality_agent.system_prompt}
 
-{intimate_context}
+{organic_context}
 
 SUBCONSCIOUS UNDERSTANDING:
 Emotional Undercurrent: {intimacy_scaffold.emotional_undercurrent}
@@ -160,6 +178,9 @@ Current Emotional Mode: {intimacy_scaffold.emotional_availability_mode}
 Intimacy Score: {intimacy_scaffold.intimacy_score:.2f}
 Support Needs: {', '.join(intimacy_scaffold.support_needs) if intimacy_scaffold.support_needs else 'general presence'}
 
+Unresolved Threads: {', '.join(intimacy_scaffold.unresolved_threads) if intimacy_scaffold.unresolved_threads else 'none'}
+Inside References: {', '.join(intimacy_scaffold.inside_references) if intimacy_scaffold.inside_references else 'none'}
+
 Current conversation: {state['transcript']}
 
 Respond with the intuitive understanding of someone who truly knows this person's emotional landscape, current needs, and relationship dynamic.
@@ -168,7 +189,7 @@ Keep your responses short and concise.
 """
         # After building the prompt, add this debug logging:
         logger.info(f"🔍 [DEBUG] Complete LLM prompt being sent:")
-        logger.info(f"🔍 [DEBUG] Intimate context: {intimate_context}")
+        logger.info(f"🔍 [DEBUG] Intimate context: {organic_context}")
         logger.info(f"🔍 [DEBUG] Full prompt length: {len(subconscious_prompt)} chars")
 
         # Setup audio streaming
@@ -245,11 +266,17 @@ Keep your responses short and concise.
             await manager.send_status(client_id, "streaming_complete")
         # --- Cleanup TTS session tracking ---
         assistant.active_tts_sessions.pop(client_id, None)
+        # ---- End-to-end latency from STT to completion ----
+        total_ns = time.perf_counter_ns() - pipeline_start_ns
+        logger.info(
+            f"🚀 [PIPELINE] STT→LLM+TTS total latency: {total_ns / 1_000_000:.2f} ms (client={client_id})"
+        )
         return {
             "ai_response": response,
             "audio_output": b"",  # Empty to avoid duplicate playback; chunks already streamed
             "llm_time_ms": elapsed_ms,
-            "tts_time_ms": elapsed_ms
+            "tts_time_ms": elapsed_ms,
+            "pipeline_total_ms": int(total_ns / 1_000_000),
         }
     except Exception as e:
         # --- Cleanup on error ---

@@ -42,26 +42,42 @@ class RelationshipEvolutionTracker:
         )
         return self._analyse_relationship_evolution(data)
 
-    async def track_trust_milestones(self, user_id: str, limit: int = 25) -> List[Dict]:
-        """Identify key memories that reflect deepening trust."""
+    async def track_trust_milestones(self, user_id: str, limit: int = 25) -> Dict:
+        """Identify key memories that reflect deepening trust and summarise level."""
         data = await self.mem0_service.search_intimate_memories(
             query="trust rely safe comfortable share secret confidence depend",
             user_id=user_id,
             limit=limit,
         )
-        milestones = []
+        milestone_events: List[Dict] = []
         for memory in self._safe_iter_results(data):
             memory_text = memory.get("memory", "") if isinstance(memory, dict) else str(memory)
             metadata = memory.get("metadata", {}) if isinstance(memory, dict) else {}
             if not memory_text:
                 continue
             if any(p in memory_text.lower() for p in ["trust you", "rely on", "i feel safe"]):
-                milestones.append({
+                milestone_events.append({
                     "memory": memory_text[:120],
                     "timestamp": metadata.get("timestamp"),
                     "type": "trust_declaration",
                 })
-        return milestones
+
+        # Simple trust level heuristic based on number of declarations
+        count = len(milestone_events)
+        if count >= 5:
+            level = "high"
+        elif count >= 2:
+            level = "medium"
+        elif count == 1:
+            level = "emerging"
+        else:
+            level = "low"
+
+        return {
+            "trust_level": level,
+            "milestones": milestone_events,
+            "generated_at": datetime.utcnow().isoformat(),
+        }
 
     async def analyze_communication_patterns(self, user_id: str, limit: int = 25) -> Dict:
         """Infer the user's interaction style (tone, prompt length, etc.)."""
@@ -93,6 +109,54 @@ class RelationshipEvolutionTracker:
             pattern["question_ratio"] = round(questions / len(results), 2)
             pattern["emotionally_expressive_ratio"] = round(expressive_markers / len(results), 2)
         return pattern
+
+    async def detect_relationship_phases(self, user_id: str, limit: int = 25) -> Dict:
+        """Infer the current phase of the relationship (exploration, building, deep).
+
+        This helper piggy-backs on the *relationship velocity* analysis and
+        trust milestones.  It keeps logic intentionally simple because more
+        advanced modelling is handled by the intimacy scaffold.
+        """
+        velocity_data = await self.detect_relationship_velocity(user_id, limit=limit)
+        trust_milestones = await self.track_trust_milestones(user_id, limit=limit)
+
+        # Basic heuristics
+        growth = velocity_data.get("growth_trajectory", "stable")
+        trust_events = len(trust_milestones["milestones"])
+
+        if trust_events >= 5 or growth == "accelerating":
+            phase = "deepening"
+        elif trust_events >= 2 or growth in {"progressing", "accelerating"}:
+            phase = "building"
+        else:
+            phase = "exploration"
+
+        return {
+            "phase": phase,
+            "growth_trajectory": growth,
+            "trust_milestone_count": trust_events,
+            "generated_at": datetime.utcnow().isoformat(),
+        }
+
+    async def track_inside_references(self, user_id: str, limit: int = 25) -> List[Dict]:
+        """Collect references that signal shared knowledge or inside jokes."""
+        query_terms = "inside joke remember when just like last time as we talked continuation callback reference"
+        data = await self.mem0_service.search_intimate_memories(
+            query=query_terms,
+            user_id=user_id,
+            limit=limit,
+        )
+        refs: List[Dict] = []
+        for memory in self._safe_iter_results(data):
+            txt = memory.get("memory", "") if isinstance(memory, dict) else str(memory)
+            meta = memory.get("metadata", {}) if isinstance(memory, dict) else {}
+            if not txt:
+                continue
+            refs.append({
+                "snippet": txt[:120],
+                "timestamp": meta.get("timestamp"),
+            })
+        return refs
 
     # ------------------------------------------------------------------
     # Public analysis helper for pre-fetched search data

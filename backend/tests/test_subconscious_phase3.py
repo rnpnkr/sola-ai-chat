@@ -1,9 +1,12 @@
 import asyncio
 import pytest
-from backend.memory.mem0_async_service import IntimateMemoryService
-from backend.subconscious.emotional_archaeology import EmotionalArchaeology
-from backend.subconscious.relationship_evolution import RelationshipEvolutionTracker
-from backend.subconscious.background_processor import PersistentSubconsciousProcessor
+import sys, os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+from memory.mem0_async_service import IntimateMemoryService
+from subconscious.emotional_archaeology import EmotionalArchaeology
+from subconscious.relationship_evolution import RelationshipEvolutionTracker
+from subconscious.background_processor import PersistentSubconsciousProcessor
 
 @pytest.mark.asyncio
 async def test_phase3_implementation():

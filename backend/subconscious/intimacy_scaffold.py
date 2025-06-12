@@ -88,27 +88,173 @@ class IntimacyScaffoldManager:
             logger.error(f"Error updating scaffold cache for {user_id}: {e}")
     
     async def _build_scaffold_from_mem0(self, user_id: str) -> IntimacyScaffold:
-        """Build intimacy scaffold from Mem0 stored insights"""
+        """Build intimacy scaffold driven by organic graph relationships."""
         try:
-            # Search for latest relationship evolution insights
-            relationship_insights = await self.mem0_service.search_intimate_memories(
-                query="relationship_evolution subconscious_analysis system_analysis",
+            # ----------------------------------------------------------
+            # 🌱 ORGANIC GRAPH SEARCHES (Mem0 vector+graph hybrid)
+            # ----------------------------------------------------------
+            relationship_context = await self.mem0_service.search_relationship_context(
                 user_id=user_id,
-                limit=1
+                limit=5,
             )
-            
-            # Get recent conversation context
-            recent_conversations = await self.mem0_service.search_intimate_memories(
-                query="conversation interaction",
+
+            trust_evolution = await self.mem0_service.search_trust_evolution(
                 user_id=user_id,
-                limit=5
+                limit=3,
             )
-            
-            return self._parse_scaffold_from_memories(relationship_insights, recent_conversations, user_id)
-            
+
+            # ----------------------------------------------------------
+            # 🧠 Graph traversal helpers (Neo4j direct)
+            # ----------------------------------------------------------
+            if self.graph_query_service:
+                organic_patterns = self.graph_query_service.discover_relationship_patterns(user_id)
+                emotional_context = self.graph_query_service.get_organic_emotional_context(user_id)
+            else:
+                organic_patterns = {}
+                emotional_context = []
+
+            return self._build_organic_scaffold(
+                relationship_context,
+                trust_evolution,
+                organic_patterns,
+                emotional_context,
+                user_id,
+            )
+
         except Exception as e:
-            logger.error(f"Error building scaffold from Mem0 for {user_id}: {e}", exc_info=True)
+            logger.error("Error building organic scaffold for %s: %s", user_id, e, exc_info=True)
             return self._get_default_scaffold()
+
+    # ------------------------------------------------------------------
+    # 🌿 Organic scaffold construction helpers (Phase 4)
+    # ------------------------------------------------------------------
+
+    def _build_organic_scaffold(
+        self,
+        relationship_context: Dict,
+        trust_evolution: Dict,
+        organic_patterns: Dict,
+        emotional_context: List[str],
+        user_id: str,
+    ) -> IntimacyScaffold:
+        """Construct IntimacyScaffold from organic graph data."""
+
+        emotional_undercurrent = self._synthesize_emotional_undercurrent(emotional_context)
+        relationship_depth = self._assess_organic_relationship_depth(trust_evolution, organic_patterns)
+        communication_dna = self._extract_organic_communication_patterns(relationship_context, organic_patterns)
+        support_needs = self._identify_organic_support_needs(relationship_context, emotional_context)
+        unresolved_threads = self._extract_organic_unresolved_threads(relationship_context)
+        conversation_count = len(relationship_context.get("results", [])) + len(trust_evolution.get("results", []))
+
+        scaffold = IntimacyScaffold(
+            emotional_undercurrent=emotional_undercurrent,
+            unresolved_threads=unresolved_threads,
+            communication_dna=communication_dna,
+            relationship_depth=relationship_depth,
+            emotional_availability_mode=self._determine_organic_emotional_mode(emotional_context),
+            support_needs=support_needs,
+            inside_references=self._extract_organic_inside_references(relationship_context),
+            conversation_count=conversation_count,
+            last_updated=datetime.now(),
+        )
+
+        # Compute intimacy score (simple heuristic for now)
+        scaffold.intimacy_score = self._calculate_organic_intimacy_score(scaffold, organic_patterns)
+
+        scaffold.emotional_relationship_map = {
+            "organic_patterns": organic_patterns,
+            "emotional_context": emotional_context,
+        }
+
+        return scaffold
+
+    def _synthesize_emotional_undercurrent(self, emotional_context: List[str]) -> str:
+        if not emotional_context:
+            return "exploring_connection"
+        counts: Dict[str, int] = {}
+        for line in emotional_context:
+            lower = line.lower()
+            for theme in ["trust", "vulnerability", "joy", "anxiety", "growth", "support", "connection"]:
+                if theme in lower:
+                    counts[theme] = counts.get(theme, 0) + 1
+        if not counts:
+            return "building_connection"
+        dominant = max(counts, key=counts.get)
+        mapping = {
+            "trust": "trust_deepening",
+            "vulnerability": "vulnerability_present",
+            "joy": "predominantly_positive",
+            "anxiety": "working_through_challenges",
+            "growth": "personal_development",
+            "support": "mutual_support_building",
+            "connection": "emotional_bonding",
+        }
+        return mapping.get(dominant, "evolving_relationship")
+
+    def _assess_organic_relationship_depth(self, trust_evolution: Dict, organic_patterns: Dict) -> str:
+        trust_events = len(trust_evolution.get("results", [])) if isinstance(trust_evolution, dict) else 0
+        pattern_count = len(organic_patterns)
+        if trust_events >= 5 or pattern_count > 10:
+            return "intimate_companionship"
+        if trust_events >= 2 or pattern_count > 3:
+            return "growing_trust"
+        return "initial_curiosity"
+
+    def _extract_organic_communication_patterns(self, relationship_context: Dict, organic_patterns: Dict) -> Dict[str, str]:
+        style = "adaptive"
+        if isinstance(relationship_context, dict):
+            texts = [m.get("memory", "") for m in relationship_context.get("results", []) if isinstance(m, dict)]
+            avg_len = sum(len(t) for t in texts) / max(len(texts), 1) if texts else 0
+            if avg_len > 120:
+                style = "long_form"
+            elif avg_len < 40:
+                style = "concise"
+        return {"style": style, "pattern_count": str(len(organic_patterns))}
+
+    def _identify_organic_support_needs(self, relationship_context: Dict, emotional_context: List[str]) -> List[str]:
+        needs = []
+        combined = " ".join(emotional_context).lower()
+        if "anxious" in combined or "worried" in combined:
+            needs.append("reassurance")
+        if "lonely" in combined:
+            needs.append("companionship")
+        if "happy" in combined and "share" in combined:
+            needs.append("celebration")
+        return needs[:3]
+
+    def _extract_organic_unresolved_threads(self, relationship_context: Dict) -> List[str]:
+        threads = []
+        for res in relationship_context.get("results", []):
+            text = res.get("memory", "").lower() if isinstance(res, dict) else str(res).lower()
+            if any(w in text for w in ["worried", "anxious", "concerned"]):
+                threads.append(text[:60])
+        return threads[:3]
+
+    def _determine_organic_emotional_mode(self, emotional_context: List[str]) -> str:
+        joined = " ".join(emotional_context).lower()
+        if any(w in joined for w in ["happy", "joy", "excited"]):
+            return "celebrating"
+        if any(w in joined for w in ["anxious", "worried", "sad", "lonely"]):
+            return "seeking_support"
+        return "exploring"
+
+    def _extract_organic_inside_references(self, relationship_context: Dict) -> List[str]:
+        refs = []
+        for res in relationship_context.get("results", []):
+            txt = res.get("memory", "") if isinstance(res, dict) else str(res)
+            if "remember" in txt.lower() or "as we discussed" in txt.lower():
+                refs.append(txt[:120])
+        return refs[:5]
+
+    def _calculate_organic_intimacy_score(self, scaffold: IntimacyScaffold, organic_patterns: Dict) -> float:
+        score = 0.3  # baseline
+        if scaffold.relationship_depth == "growing_trust":
+            score += 0.2
+        elif scaffold.relationship_depth == "intimate_companionship":
+            score += 0.4
+        score += min(len(organic_patterns) / 20, 0.2)
+        score += 0.1 if scaffold.emotional_undercurrent == "trust_deepening" else 0
+        return round(min(score, 1.0), 2)
     
     def _parse_scaffold_from_memories(self, relationship_insights: Dict, recent_conversations: Dict, user_id: str) -> IntimacyScaffold:
         """Parse Mem0 memories into IntimacyScaffold structure"""

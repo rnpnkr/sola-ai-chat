@@ -206,4 +206,111 @@ class GraphQueryService:
                     "when_achieved": rec["when_achieved"],
                 }
                 for rec in records
-            ] 
+            ]
+
+    # ------------------------------------------------------------------
+    # 🌱 Organic relationship discovery helpers (Phase 3)
+    # ------------------------------------------------------------------
+
+    def discover_relationship_patterns(self, user_id: str) -> Dict[str, List[dict]]:
+        """Discover relationship patterns that have organically formed for the user.
+
+        This issues a generic pattern-matching query without assuming any
+        pre-defined relationship types beyond the existence of *some*
+        relationship between two nodes owned by the same user. We aggregate by
+        relationship type and return basic frequency statistics so higher-level
+        services can reason about dominant patterns.
+        """
+        query = (
+            "MATCH (n {user_id: $uid})-[r]->(m {user_id: $uid}) "
+            "RETURN DISTINCT type(r) as relationship_type, "
+            "labels(n) as from_labels, labels(m) as to_labels, count(*) as frequency "
+            "ORDER BY frequency DESC LIMIT 20"
+        )
+
+        driver = self._ensure_driver()
+        if not driver:
+            return {}
+
+        patterns: Dict[str, List[dict]] = {}
+        try:
+            with driver.session(database=self.database) as session:
+                for record in session.run(query, uid=user_id):
+                    rel_type = record["relationship_type"]
+                    entry = {
+                        "from": record["from_labels"],
+                        "to": record["to_labels"],
+                        "frequency": record["frequency"],
+                    }
+                    patterns.setdefault(rel_type, []).append(entry)
+        except Exception as exc:  # pragma: no cover  – network/DB issues covered elsewhere
+            logger.error("Failed to discover relationship patterns: %s", exc)
+            return {}
+
+        return patterns
+
+    def get_organic_emotional_context(self, user_id: str, limit: int = 5) -> List[str]:
+        """Retrieve recent emotional context without assuming a fixed taxonomy.
+
+        We simply look for nodes that *appear* to contain emotional semantics –
+        either via their labels (containing the word *motion*) or property keys
+        that reference feelings. The heuristic keeps queries future-proof while
+        still surfacing useful context lines for the intimacy scaffold.
+        """
+        query = (
+            "MATCH (n {user_id: $uid}) "
+            "WHERE any(lbl IN labels(n) WHERE lbl CONTAINS 'motion') "
+            "   OR any(prop IN keys(n) WHERE prop CONTAINS 'emotion' OR prop CONTAINS 'feel') "
+            "RETURN n, labels(n) as node_labels "
+            "ORDER BY n.created_at DESC LIMIT $lim"
+        )
+
+        driver = self._ensure_driver()
+        if not driver:
+            return []
+
+        lines: List[str] = []
+        try:
+            with driver.session(database=self.database) as session:
+                for record in session.run(query, uid=user_id, lim=limit):
+                    node = record["n"]
+                    labels = record["node_labels"]
+                    organic_info = self._extract_emotional_info(node, labels)
+                    if organic_info:
+                        lines.append(organic_info)
+        except Exception as exc:  # pragma: no cover
+            logger.error("Failed to fetch organic emotional context: %s", exc)
+            return []
+
+        return lines
+
+    # ------------------------------------------------------------------
+    # Internal organic helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _extract_emotional_info(node: dict, labels: List[str]) -> str:
+        """Extract emotion-relevant snippets from an arbitrary node structure."""
+        info_parts: List[str] = []
+
+        # Surfacing label hints can be useful context on its own.
+        label_hint = ",".join(labels)
+        if label_hint:
+            info_parts.append(f"labels: {label_hint}")
+
+        # Look for probable emotional payload in properties
+        for key, value in node.items():
+            if key in {"user_id", "created_at"}:
+                continue
+            if isinstance(value, str):
+                lower_val = value.lower()
+                if any(word in lower_val for word in [
+                    "feel", "emotion", "happy", "sad", "anxious", "trust", "vulnerable", "love", "fear"
+                ]):
+                    info_parts.append(f"{key}: {value}")
+            else:
+                # Non-str values are included verbatim if the key name is emotion-like
+                if any(tok in key.lower() for tok in ["emotion", "feel", "mood"]):
+                    info_parts.append(f"{key}: {value}")
+
+        return " | ".join(info_parts) if info_parts else "" 

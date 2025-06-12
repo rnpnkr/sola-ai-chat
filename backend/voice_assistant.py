@@ -911,12 +911,14 @@ async def graph_health_check():
         return {
             "status": "healthy",
             "graph_store": "neo4j_connected",
+            "schema_mode": "minimal_indexes",
             "hybrid_mode": "vector_and_graph",
         }
     except Exception as e:
         return {
             "status": "degraded",
             "graph_store": "unavailable",
+            "schema_mode": "minimal_indexes",
             "hybrid_mode": "vector_only_fallback",
             "error": str(e),
         }

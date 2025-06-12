@@ -77,6 +77,26 @@ class EmotionalArchaeology:
             data, positive=False, label="pain_points", keywords=self._PAIN_KEYWORDS.split()
         )
 
+    async def track_growth_arcs(self, user_id: str, limit: int = 25) -> Dict:
+        """Identify emotional growth arcs by searching for reflective memories.
+
+        Growth arcs are moments where the user explicitly references personal
+        change, insight, or progress (e.g. *"I've realised…", "I'm getting
+        better at…", "I finally overcame…").  We perform a targeted search and
+        then summarise a timeline-like structure that downstream components can
+        visualise or further analyse.
+        """
+        growth_keywords = (
+            "growth progress evolved improvement overcome learned realised realized insight change better"
+        )
+
+        data = await self.mem0_service.search_intimate_memories(
+            query=growth_keywords,
+            user_id=user_id,
+            limit=limit,
+        )
+        return self._analyse_growth_arcs(data)
+
     # ------------------------------------------------------------------
     # Public *analysis-only* helpers (operate on already fetched data)
     # ------------------------------------------------------------------
@@ -193,4 +213,34 @@ class EmotionalArchaeology:
             "occurrences": pattern_results,
             "generated_at": datetime.utcnow().isoformat(),
             "positive": positive,
+        }
+
+    # ------------------------------------------------------------------
+    # Private growth-analysis helper
+    # ------------------------------------------------------------------
+
+    def _analyse_growth_arcs(self, search_data: Dict) -> Dict:
+        """Produce a lightweight growth timeline from Mem0 search output."""
+        results = self._safe_iter_results(search_data)
+        timeline: List[Dict] = []
+
+        for memory in results:
+            text = str(memory.get("memory", "")) if isinstance(memory, dict) else str(memory)
+            meta = memory.get("metadata", {}) if isinstance(memory, dict) else {}
+            if not text:
+                continue
+
+            # Basic heuristics for growth direction (positive/negative)
+            direction = "positive" if any(k in text.lower() for k in ["better", "overcome", "improved", "growth"]) else "neutral"
+            timestamp = meta.get("timestamp") or meta.get("created_at")
+            timeline.append({
+                "snippet": text[:120],
+                "direction": direction,
+                "timestamp": timestamp,
+            })
+
+        return {
+            "growth_events": timeline,
+            "event_count": len(timeline),
+            "generated_at": datetime.utcnow().isoformat(),
         }
