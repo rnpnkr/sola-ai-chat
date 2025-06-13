@@ -55,7 +55,12 @@ class IntimateMemoryService:
                 "host": parsed_url.hostname,
                 "port": parsed_url.port,
                 "dbname": parsed_url.path.lstrip('/'),
-            }
+                # Use dedicated 384-dim table; avoid dots to keep SQL valid
+                "collection_name": "mem0_384",
+                "embedding_model_dims": 384,
+                "diskann": False,
+                "hnsw": True,
+            },
         }
 
         # Graph store configuration (Neo4j)
@@ -81,11 +86,10 @@ class IntimateMemoryService:
                 }
             },
             embedder={
-                "provider": "openai",
+                "provider": "huggingface",
                 "config": {
-                    "api_key": os.getenv("OPENAI_API_KEY"),
-                    "model": os.getenv("OPEN_AI_EMBEDDING_MODEL", "text-embedding-3-small"),
-                }
+                    "model": "sentence-transformers/all-MiniLM-L6-v2",
+                },
             },
             version="v1.1",
         )
@@ -134,7 +138,14 @@ class IntimateMemoryService:
             logger.error(f"❌ Mem0 search failed for {user_id}: {e}", exc_info=True)
             return {"results": [], "error": str(e)}
 
-    async def store_conversation_memory(self, messages: List[Dict], user_id: str, metadata: Optional[Dict] = None) -> Dict:
+    async def store_conversation_memory(
+        self,
+        messages: List[Dict],
+        user_id: str,
+        metadata: Optional[Dict] = None,
+        *,
+        infer: bool = True,
+    ) -> Dict:
         """Stores conversation history as a memory."""
         await self._ensure_memory_initialized()
         try:
@@ -142,7 +153,8 @@ class IntimateMemoryService:
             result = await self.memory.add(
                 messages,
                 user_id=user_id,
-                metadata=metadata
+                metadata=metadata,
+                infer=infer,
             )
             logger.info(f"Successfully stored conversation memory for {user_id}: {result}")
             return {"status": "success", "result": result}

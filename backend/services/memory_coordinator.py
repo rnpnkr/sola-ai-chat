@@ -161,7 +161,7 @@ class MemoryCoordinator:
                         })
                     logger.info(f"🔍 [DEBUG] Sending to Mem0 - Enhanced messages: {enhanced_messages}")
                     logger.info(f"🔍 [DEBUG] Sending to Mem0 - Metadata: {content['metadata']}")
-                    # Store enhanced version
+                    # 1) Store the overall enhanced turn (behavioural snapshot)
                     result = await self.mem0_service.store_conversation_memory(
                         messages=enhanced_messages,
                         user_id=op["user_id"],
@@ -170,9 +170,27 @@ class MemoryCoordinator:
                             "context_enhanced": enhancement["enhancement_applied"],
                             "original_user_message": user_message,
                             "enhancement_facts": enhancement.get("memory_facts", [])
-                        }
+                        },
+                        infer=True,  # keep Mem0 heuristic for behavioural summary
                     )
                     logger.info(f"🔍 [DEBUG] Mem0 storage result: {result}")
+
+                    # 2) Store EACH extracted fact as its own atomic memory so it
+                    #    receives an independent embedding and can be recalled via
+                    #    similarity search (e.g., user name, family info, etc.).
+                    for fact in enhancement.get("memory_facts", []):
+                        # Skip if fact already stored as main data to avoid duplicates
+                        if fact == enhanced_messages[0]["content"] or fact == enhanced_messages[1]["content"]:
+                            pass  # already captured in behavioural row
+                        await self.mem0_service.store_conversation_memory(
+                            messages=[{"role": "system", "content": fact}],
+                            user_id=op["user_id"],
+                            metadata={
+                                "fact_source": "enhancer",
+                                "origin_turn": content["metadata"].get("timestamp"),
+                            },
+                            infer=False,  # direct insert, no extra LLM pass
+                        )
                 else:
                     # Fallback to original storage
                     logger.info(f"🔍 [DEBUG] Sending to Mem0 - Original messages: {content['messages']}")

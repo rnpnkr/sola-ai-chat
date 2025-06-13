@@ -33,6 +33,12 @@ logger = logging.getLogger(__name__)
 app = FastAPI(title="WebSocket Voice Assistant")
 
 # ---------------------------------------------------------------------------
+# Feature flag: toggle memory layer via env var (default enabled)
+# Set ENABLE_MEMORY_LAYER=false to completely bypass intimate-memory features.
+# ---------------------------------------------------------------------------
+ENABLE_MEMORY_LAYER = os.getenv("ENABLE_MEMORY_LAYER", "true").lower() == "true"
+
+# ---------------------------------------------------------------------------
 # Application lifecycle events
 # ---------------------------------------------------------------------------
 
@@ -129,6 +135,10 @@ class VoiceAssistantWebSocket:
         Sends optional status messages to the frontend so the UI can show a
         loading indicator while the scaffold is prepared.
         """
+        # Skip warming entirely if memory layer is disabled
+        if not ENABLE_MEMORY_LAYER:
+            logger.info(f"[{client_id}] Memory layer disabled – skipping scaffold warm-up.")
+            return
         try:
             await manager.send_status(client_id, "scaffold_warming")
             scaffold_manager = ServiceRegistry.get_scaffold_manager()
@@ -137,7 +147,8 @@ class VoiceAssistantWebSocket:
             logger.info(f"[{client_id}] Intimacy scaffold warmed for {user_id}")
         except Exception as werr:
             logger.error(f"Failed to warm scaffold for {user_id}: {werr}")
-            await manager.send_error(client_id, "scaffold_warm_failed")
+            if ENABLE_MEMORY_LAYER:
+                await manager.send_error(client_id, "scaffold_warm_failed")
 
     async def _cleanup_client_session(self, client_id: str, *, clear_scaffold_cache: bool = False):
         """Safely cleans up all resources associated with a client's streaming session.
@@ -273,7 +284,7 @@ class VoiceAssistantWebSocket:
             # ------------------------------------------------------------------
             # 🔥 Warm intimacy scaffold cache EARLY so later calls are instant
             # ------------------------------------------------------------------
-            if user_id:
+            if ENABLE_MEMORY_LAYER and user_id:
                 try:
                     scaffold_manager = ServiceRegistry.get_scaffold_manager()
                     # Fire-and-forget – we do not await; just start building cache.
@@ -620,21 +631,37 @@ class VoiceAssistantWebSocket:
     async def _store_conversation_chat(self, user_id: str, client_id: str, user_message: str, ai_response: str):
         """Store conversation in chat storage with robust error handling"""
         try:
-            coordinator = get_memory_coordinator()
-            # Use the new direct storage method
-            result = await coordinator.store_chat_and_memory(
-                user_id=user_id,
-                session_id=client_id,
-                user_message=user_message,
-                ai_response=ai_response,
-                metadata={
-                    "client_id": client_id,
-                    "conversation_type": "voice_chat",
-                    "timestamp": datetime.now().isoformat()
-                }
-            )
-            logger.info(f"✅ Successfully stored chat for user {user_id}: '{user_message[:50]}...'")
-            return result
+            if ENABLE_MEMORY_LAYER:
+                coordinator = get_memory_coordinator()
+                # Use the new direct storage method
+                result = await coordinator.store_chat_and_memory(
+                    user_id=user_id,
+                    session_id=client_id,
+                    user_message=user_message,
+                    ai_response=ai_response,
+                    metadata={
+                        "client_id": client_id,
+                        "conversation_type": "voice_chat",
+                        "timestamp": datetime.now().isoformat()
+                    }
+                )
+                logger.info(f"✅ Successfully stored chat+memory for user {user_id}: '{user_message[:50]}...'")
+                return result
+            else:
+                # Memory disabled – persist chat only
+                await chat_service.store_chat(
+                    user_id=user_id,
+                    session_id=client_id,
+                    user_message=user_message,
+                    ai_response=ai_response,
+                    metadata={
+                        "client_id": client_id,
+                        "conversation_type": "voice_chat_no_memory",
+                        "timestamp": datetime.now().isoformat()
+                    }
+                )
+                logger.info(f"✅ Stored chat (memory disabled) for user {user_id}: '{user_message[:50]}...'")
+                return True
         except Exception as e:
             logger.error(f"❌ Failed to store chat for user {user_id}: {e}")
             # Direct fallback to chat service
