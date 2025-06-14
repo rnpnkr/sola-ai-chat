@@ -260,6 +260,8 @@
         </div>
     </div>
     <script>
+        // --- Global Config ---
+        const MEMORY_LAYER_ENABLED = false; // Disable memory layer & related UI
         // --- Auth & State ---
         let authToken = localStorage.getItem('auth_token');
         let username = localStorage.getItem('username') || 'User';
@@ -359,7 +361,11 @@
             hideAuthModal();
             document.querySelector('.chat-container').style.display = 'flex';
             userInfo.textContent = username;
-            showLoading(true); // Show loading until scaffold_ready arrives
+            if (MEMORY_LAYER_ENABLED) {
+                showLoading(true); // Only show if memory layer is enabled
+            }
+            connectWS();
+            loadChatHistory();
         }
         function handleLogin() {
             const email = document.getElementById('login-email').value;
@@ -378,8 +384,6 @@
                     localStorage.setItem('auth_token', authToken);
                     localStorage.setItem('username', username);
                     showChatInterface();
-                    connectWS();
-                    loadChatHistory();
                 } else {
                     const errorMessage = data.detail || 'Login failed';
                     loginError.textContent = errorMessage;
@@ -405,8 +409,6 @@
             document.querySelector('.chat-container').style.display = 'none';
         } else {
             showChatInterface();
-            connectWS();
-            loadChatHistory();
         }
 
         // --- Chat Message Functions ---
@@ -736,11 +738,15 @@
                 }
 
                 if (msg.type === 'status') {
-                    if (msg.status === 'scaffold_warming') {
+                    // Memory-related overlay
+                    if (MEMORY_LAYER_ENABLED && msg.status === 'scaffold_warming') {
                         showLoading(true);
-                    } else if (msg.status === 'scaffold_ready') {
+                    } else if (MEMORY_LAYER_ENABLED && msg.status === 'scaffold_ready') {
                         showLoading(false);
-                    } else if (msg.status === 'transcription_complete') {
+                    }
+
+                    // Statuses always handled
+                    if (msg.status === 'transcription_complete') {
                         updateLastMessage(msg.transcript);
                     } else if (msg.status === 'llm_tts_streaming') {
                         setVoiceState(VoiceState.AI_SPEAKING);
@@ -802,7 +808,9 @@
                         voiceStatus.style.display = 'none';
                     }, 3000);
                     if (msg.message === 'scaffold_warm_failed') {
-                        showLoading(false);
+                        if (MEMORY_LAYER_ENABLED) {
+                            showLoading(false);
+                        }
                     }
                 }
                 else if (msg.type === 'speech_interrupted' || msg.type === 'interruption_result') {

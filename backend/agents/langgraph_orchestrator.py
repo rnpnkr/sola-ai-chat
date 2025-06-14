@@ -47,6 +47,11 @@ intimacy_scaffold_manager = ServiceRegistry.get_scaffold_manager()
 anticipatory_engine = AnticippatoryIntimacyEngine(mem0_service, intimacy_scaffold_manager)
 
 # ---------------------------------------------------------------------------
+# Memory layer toggle (set ENV var ENABLE_MEMORY_LAYER=false to fully disable)
+# ---------------------------------------------------------------------------
+ENABLE_MEMORY_LAYER = os.getenv("ENABLE_MEMORY_LAYER", "true").lower() == "true"
+
+# ---------------------------------------------------------------------------
 # Utility: simple timing context manager for granular latency logging
 # ---------------------------------------------------------------------------
 
@@ -152,21 +157,33 @@ async def llm_tts_streaming_node(state: ConversationState, config=None):
         text_buffer = StreamingTextBuffer(min_chunk_size=15, max_chunk_size=100)
         # --- Store TTS session in global assistant instance for interruption support ---
         assistant.active_tts_sessions[client_id] = elevenlabs_ws
-        # Prepare context – now with granular latency tracking
-        with time_section("build_intimate_context", client_id):
-            intimate_context = await memory_context_builder.build_intimate_context(
-                current_message=state["transcript"],
-                user_id=user_id
-            )
+        # Prepare context – now with granular latency tracking (skip when disabled)
+        if ENABLE_MEMORY_LAYER:
+            with time_section("build_intimate_context", client_id):
+                intimate_context = await memory_context_builder.build_intimate_context(
+                    current_message=state["transcript"],
+                    user_id=user_id
+                )
+        else:
+            intimate_context = ""  # Memory disabled
 
-        with time_section("get_intimacy_scaffold", client_id):
-            intimacy_scaffold = await intimacy_scaffold_manager.get_intimacy_scaffold(user_id)
+        # Retrieve intimacy scaffold (skip when disabled)
+        if ENABLE_MEMORY_LAYER:
+            with time_section("get_intimacy_scaffold", client_id):
+                intimacy_scaffold = await intimacy_scaffold_manager.get_intimacy_scaffold(user_id)
+        else:
+            from subconscious.intimacy_scaffold import IntimacyScaffold  # lightweight import
+            intimacy_scaffold = IntimacyScaffold()  # default empty scaffold
 
-        with time_section("anticipatory_engine_response_guidance", client_id):
-            response_guidance = await anticipatory_engine.generate_response_guidance(
-                user_id=user_id,
-                current_message=state["transcript"]
-            )
+        # Anticipatory engine guidance can be heavy; also skip when memory disabled
+        if ENABLE_MEMORY_LAYER:
+            with time_section("anticipatory_engine_response_guidance", client_id):
+                response_guidance = await anticipatory_engine.generate_response_guidance(
+                    user_id=user_id,
+                    current_message=state["transcript"]
+                )
+        else:
+            response_guidance = ""
         # Build prompt (same as before)
         subconscious_prompt = f"""{personality_agent.system_prompt}
 
@@ -291,8 +308,8 @@ async def subconscious_node(state: ConversationState, config=None):
         if started:
             logger.info(f"✅ Background processing ensured for {user_id}")
         
-        # Store conversation memory immediately
-        if state.get("transcript") and state.get("ai_response"):
+        # Store conversation memory immediately (skip when memory layer disabled)
+        if ENABLE_MEMORY_LAYER and state.get("transcript") and state.get("ai_response"):
             coordinator = get_memory_coordinator()
             memory_op_id = await coordinator.store_chat_and_memory(
                 user_id=user_id,
