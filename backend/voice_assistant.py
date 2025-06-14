@@ -666,7 +666,6 @@ class VoiceAssistantWebSocket:
             logger.error(f"❌ Failed to store chat for user {user_id}: {e}")
             # Direct fallback to chat service
             try:
-                from services.chat_service import chat_service
                 await chat_service.store_chat(
                     user_id=user_id,
                     session_id=client_id,
@@ -682,7 +681,6 @@ class VoiceAssistantWebSocket:
         """Verify if chat was actually stored"""
         try:
             await asyncio.sleep(1.0)  # Wait for storage to complete
-            from services.chat_service import chat_service
             recent_chats = await chat_service.get_user_chats(user_id, limit=1)
             return len(recent_chats) > 0
         except Exception as e:
